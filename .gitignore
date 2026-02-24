@@ -1,0 +1,14 @@
+.DS_Store
+.idea
+.claude
+.claude.json
+*.*~
+*.log*
+
+/.vscode/**
+!/.vscode/settings.json
+!/.vscode/launch.json
+
+.env
+
+!.gitkeep
