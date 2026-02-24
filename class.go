@@ -26,7 +26,8 @@ const (
 
 	ClassSerializationError Class = "serialization_error"
 	ClassUnexpected         Class = "unexpected"
-	ClassNotImplemented     Class = "not_impllemented"
+	ClassNotImplemented     Class = "not_implemented"
+	ClassLocked             Class = "locked"
 )
 
 // classMeta holds the default metadata for each class (internal).
@@ -59,6 +60,7 @@ var classRegistry = map[Class]classMeta{
 	ClassUnexpected:         {"unexpected", "Unexpected Error", "An unexpected error occurred.", http.StatusInternalServerError},
 
 	ClassNotImplemented: {"not_implemented", "Not Implemented", "Not Implemented.", http.StatusNotImplemented},
+	ClassLocked:         {"locked", "Locked", "Locked.", http.StatusLocked},
 }
 
 // ClassDef describes a custom error class for registration.

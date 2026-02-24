@@ -52,6 +52,7 @@ func Unexpected(args ...any) *Error         { return newFromClass(ClassUnexpecte
 
 func BadRequest(args ...any) *Error     { return newFromClass(ClassBadRequest, 1, args) }
 func NotImplemented(args ...any) *Error { return newFromClass(ClassNotImplemented, 1, args) }
+func Locked(args ...any) *Error         { return newFromClass(ClassLocked, 1, args) }
 
 // New creates an error with an arbitrary class.
 func New(class Class, args ...any) *Error {

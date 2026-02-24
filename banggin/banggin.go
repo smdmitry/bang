@@ -26,23 +26,6 @@ func AbortError(c *gin.Context, err error) {
 	c.Abort()
 }
 
-// ErrorMiddleware is a single JSON serialization point for errors collected in gin.Context.
-func ErrorMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Next()
-
-		if len(c.Errors) == 0 || c.Writer.Written() {
-			return
-		}
-		last := c.Errors.Last()
-		if last == nil || last.Err == nil {
-			return
-		}
-
-		writeProblem(c, last.Err, bang.HTTPResponseOptions{})
-	}
-}
-
 // RecoveryMiddleware recovers panics and writes an RFC7807 response.
 // It works with and without ErrorMiddleware.
 func RecoveryMiddleware() gin.HandlerFunc {
