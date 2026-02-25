@@ -279,6 +279,10 @@ func (e *Error) Unwrap() error { return e.cause }
 // Is reports whether target matches this error (by code or class).
 // This enables errors.Is(err, bang.NotFound()) style checks.
 func (e *Error) Is(target error) bool {
+	if matcher, ok := target.(classMatcher); ok {
+		return e.class == matcher.bangClass()
+	}
+
 	var t *Error
 	if !errors.As(target, &t) {
 		return false
