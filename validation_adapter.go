@@ -1,4 +1,4 @@
-package banggin
+package bang
 
 import (
 	"encoding/json"
@@ -9,9 +9,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/gin-gonic/gin/binding"
 	"github.com/go-playground/validator/v10"
-	"github.com/smdmitry/bang"
 )
 
 const (
@@ -19,18 +17,19 @@ const (
 	bindJSONCode       = "request.bind"
 )
 
-// BindErr converts gin/oapi bind and validation errors into bang.Validation.
-func BindErr(err error) error {
+type SliceValidationError []error
+
+func bindErr(err error) *Error {
 	if err == nil {
 		return nil
 	}
-	if _, ok := bang.AsBang(err); ok {
-		return err
+	if bangErr, ok := AsBang(err); ok {
+		return bangErr
 	}
 
 	fields := collectValidationErrors(err)
 	if len(fields) > 0 {
-		e := bang.Validation(bindValidationCode).
+		e := Validation().Code(bindValidationCode).
 			Msg("Некорректные параметры запроса").
 			Wrap(err)
 
@@ -57,14 +56,15 @@ func collectValidationErrors(err error) []validator.FieldError {
 		return out
 	}
 
-	var sliceErr binding.SliceValidationError
+	// TODO: fix this code
+	/*var sliceErr SliceValidationError
 	if errors.As(err, &sliceErr) {
 		out := make([]validator.FieldError, 0, len(sliceErr))
 		for _, nested := range sliceErr {
 			out = append(out, collectValidationErrors(nested)...)
 		}
 		return out
-	}
+	}*/
 
 	return nil
 }
@@ -77,7 +77,6 @@ func validationFieldKey(fe validator.FieldError) string {
 	if idx := strings.IndexByte(key, '.'); idx >= 0 {
 		key = key[idx+1:]
 	}
-
 	key = normalizeFieldPath(key)
 	if key != "" {
 		return key
@@ -112,13 +111,17 @@ func validationReason(fe validator.FieldError) string {
 	}
 }
 
-func bindPayloadErr(err error) error {
-	e := bang.Validation(bindJSONCode).
+func bindPayloadErr(err error) *Error {
+	e := Validation().Code(bindJSONCode).
 		Msg("Некорректное тело запроса").
 		Wrap(err)
 
 	if errors.Is(err, io.EOF) {
 		return e.Field("body", "required", "Тело запроса не должно быть пустым")
+	}
+
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return e.Field("body", "required", "Неожиданный конец тела запроса")
 	}
 
 	var syntaxErr *json.SyntaxError
@@ -132,7 +135,6 @@ func bindPayloadErr(err error) error {
 		if key == "" {
 			key = "body"
 		}
-
 		reason := "Некорректный тип значения"
 		if typeErr.Type != nil {
 			reason = fmt.Sprintf("Ожидается тип %s", readableType(typeErr.Type))
@@ -153,7 +155,6 @@ func unknownField(err error) (string, bool) {
 	if !strings.HasPrefix(msg, prefix) || !strings.HasSuffix(msg, `"`) {
 		return "", false
 	}
-
 	field := msg[len(prefix) : len(msg)-1]
 	field = normalizeFieldPath(field)
 	if field == "" {
@@ -167,7 +168,6 @@ func normalizeFieldPath(path string) string {
 	if path == "" {
 		return ""
 	}
-
 	path = strings.ReplaceAll(path, "[", ".")
 	path = strings.ReplaceAll(path, "]", "")
 
@@ -184,7 +184,6 @@ func normalizeFieldPath(path string) string {
 		}
 		out = append(out, lowerFirst(part))
 	}
-
 	return strings.Join(out, ".")
 }
 

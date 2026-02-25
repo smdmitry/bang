@@ -5,8 +5,8 @@ package bang
 //
 //	var Mod = bang.NewModule("orders.repo")
 //
-//	Mod.NotFound(err, "get_by_id")                       // code → "orders.repo.get_by_id"
-//	var ErrNotFound = Mod.Define(bang.ClassNotFound, "not_found") // code → "orders.repo.not_found"
+//	Mod.NotFound().Code("get_by_id")  // code → "orders.repo.get_by_id"
+//	Mod.New("get_by_id")              // code → "orders.repo.get_by_id"
 type Module struct {
 	prefix string
 }
@@ -23,91 +23,94 @@ func (m Module) fullCode(code string) string {
 	return m.prefix + "." + code
 }
 
-func (m Module) applyModuleArgs(e *Error, args []any) {
-	for _, arg := range args {
-		switch v := arg.(type) {
-		case error:
-			e.cause = v
-		case string:
-			e.code = m.fullCode(v)
-		}
-	}
-}
-
-func (m Module) newFromClass(class Class, args []any) *Error {
+func (m Module) newFromClass(class Class) *Error {
 	e := newError(class, 3) // skip: method → newFromClass → newError
-	m.applyModuleArgs(e, args)
-	// If no string arg passed, use prefix as code.
-	if e.code == getClassMeta(class).DefaultCode {
-		e.code = m.prefix
-	}
+	e.code = m.prefix
 	return e
 }
 
-// ─── Shorthand constructors (mirror top-level ones) ─────────────────────────
+// ─── Shorthand constructors ─────────────────────────────────────────────────
 
-func (m Module) InternalServer(args ...any) *Error { return m.newFromClass(ClassInternalServer, args) }
-func (m Module) NotFound(args ...any) *Error       { return m.newFromClass(ClassNotFound, args) }
-func (m Module) Unauthorized(args ...any) *Error   { return m.newFromClass(ClassUnauthorized, args) }
-func (m Module) Forbidden(args ...any) *Error      { return m.newFromClass(ClassForbidden, args) }
-func (m Module) Conflict(args ...any) *Error       { return m.newFromClass(ClassConflict, args) }
-func (m Module) TooManyRequests(args ...any) *Error {
-	return m.newFromClass(ClassTooManyRequests, args)
+func (m Module) InternalServer() *Error       { return m.newFromClass(ClassInternalServer) }
+func (m Module) NotFound() *Error             { return m.newFromClass(ClassNotFound) }
+func (m Module) BadRequest() *Error           { return m.newFromClass(ClassBadRequest) }
+func (m Module) Unauthorized() *Error         { return m.newFromClass(ClassUnauthorized) }
+func (m Module) Forbidden() *Error            { return m.newFromClass(ClassForbidden) }
+func (m Module) Conflict() *Error             { return m.newFromClass(ClassConflict) }
+func (m Module) TooManyRequests() *Error      { return m.newFromClass(ClassTooManyRequests) }
+func (m Module) DuplicateKey() *Error         { return m.newFromClass(ClassDuplicateKey) }
+func (m Module) ForeignKeyViolation() *Error  { return m.newFromClass(ClassForeignKeyViolation) }
+func (m Module) ExternalServiceError() *Error { return m.newFromClass(ClassExternalService) }
+func (m Module) NetworkError() *Error         { return m.newFromClass(ClassNetwork) }
+func (m Module) TimeoutError() *Error         { return m.newFromClass(ClassTimeout) }
+func (m Module) SerializationError() *Error   { return m.newFromClass(ClassSerialization) }
+func (m Module) Unexpected() *Error           { return m.newFromClass(ClassUnexpected) }
+func (m Module) Validation() *Error           { return m.newFromClass(ClassValidation) }
+
+// New creates an error from a code, prefixed with the module prefix.
+// If the full code is registered, its config is applied.
+func (m Module) New(code string) *Error {
+	fullCode := m.fullCode(code)
+	e := New(fullCode) // uses the global New which checks registry
+	return e
 }
 
-func (m Module) DatabaseError(args ...any) *Error { return m.newFromClass(ClassDatabaseError, args) }
-func (m Module) DuplicateKey(args ...any) *Error  { return m.newFromClass(ClassDuplicateKey, args) }
-func (m Module) ForeignKeyViolation(args ...any) *Error {
-	return m.newFromClass(ClassForeignKeyViolation, args)
+// FromClass creates an error with an arbitrary class and the module prefix as code.
+func (m Module) FromClass(class Class) *Error {
+	e := newError(class, 2)
+	e.code = m.prefix
+	return e
 }
 
-func (m Module) ExternalServiceError(args ...any) *Error {
-	return m.newFromClass(ClassExternalServiceError, args)
-}
-func (m Module) NetworkError(args ...any) *Error { return m.newFromClass(ClassNetworkError, args) }
-func (m Module) TimeoutError(args ...any) *Error { return m.newFromClass(ClassTimeoutError, args) }
-
-func (m Module) SerializationError(args ...any) *Error {
-	return m.newFromClass(ClassSerializationError, args)
-}
-func (m Module) Unexpected(args ...any) *Error { return m.newFromClass(ClassUnexpected, args) }
-
-func (m Module) New(class Class, args ...any) *Error { return m.newFromClass(class, args) }
-
-// ─── Define / DefineTyped through Module ────────────────────────────────────
+// ─── Define / TypedFactory through Module ───────────────────────────────────
 
 // Define creates an ErrFactory with the code prefixed by this module.
-func (m Module) Define(class Class, code string, opts ...DefOption) ErrFactory {
-	return Define(class, m.fullCode(code), opts...)
+func (m Module) Define(code string, cfgs ...CodeCfg) ErrFactory {
+	fullCode := m.fullCode(code)
+	var cfg CodeCfg
+	if len(cfgs) > 0 {
+		cfg = cfgs[0]
+	}
+	registryMu.Lock()
+	codeRegistry[fullCode] = cfg
+	registryMu.Unlock()
+	return Factory(fullCode)
 }
 
-// ModuleDefineTyped creates a TypedErrFactory with the code prefixed by a module.
-// (Go methods cannot have type parameters, hence this is a top-level function.)
-//
-//	var Mod = bang.NewModule("orders.repo")
-//	var ErrOrderFailed = bang.ModuleDefineTyped[OrderData](Mod, bang.ClassDatabaseError, "save_failed")
-func ModuleDefineTyped[T any](m Module, class Class, code string, opts ...DefOption) TypedErrFactory[T] {
-	return DefineTyped[T](class, m.fullCode(code), opts...)
+// Register starts building an error definition with the code prefixed by this module.
+func (m Module) Register(code string) *RegisterBuilder {
+	return Register(m.fullCode(code))
 }
 
-// ─── WrapDBError / WrapRedisError through Module ────────────────────────────
+// Factory creates an ErrFactory for a code prefixed by this module.
+func (m Module) Factory(code string) ErrFactory {
+	return Factory(m.fullCode(code))
+}
 
+// ─── Wrap adapters through Module ───────────────────────────────────────────
+
+// WrapDBError wraps a DB error with auto-classification and module-prefixed code.
 func (m Module) WrapDBError(err error, code ...string) *Error {
 	e := WrapDBError(err)
-	if e != nil && len(code) > 0 {
-		e.code = m.fullCode(code[0])
-	} else if e != nil {
-		e.code = m.prefix
+	if e != nil {
+		if len(code) > 0 {
+			e.code = m.fullCode(code[0])
+		} else {
+			e.code = m.prefix
+		}
 	}
 	return e
 }
 
+// WrapRedisError wraps a Redis error with auto-classification and module-prefixed code.
 func (m Module) WrapRedisError(err error, code ...string) *Error {
 	e := WrapRedisError(err)
-	if e != nil && len(code) > 0 {
-		e.code = m.fullCode(code[0])
-	} else if e != nil {
-		e.code = m.prefix
+	if e != nil {
+		if len(code) > 0 {
+			e.code = m.fullCode(code[0])
+		} else {
+			e.code = m.prefix
+		}
 	}
 	return e
 }

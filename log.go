@@ -14,8 +14,8 @@ type LogRecord struct {
 	Title   string `json:"title"`
 	Message string `json:"message"`
 
-	Data  map[string]any `json:"data,omitempty"`
-	Debug map[string]any `json:"debug,omitempty"`
+	Data  map[string]any `json:"data,omitempty"`  // safe data
+	Debug map[string]any `json:"debug,omitempty"` // unsafe data
 
 	File  string  `json:"file,omitempty"`
 	Line  int     `json:"line,omitempty"`
@@ -26,6 +26,7 @@ type LogRecord struct {
 }
 
 // ToLogRecord converts an error into a structured log record.
+// All fields are included (no safe/unsafe filtering).
 func ToLogRecord(err error) LogRecord {
 	var e *Error
 	if !errors.As(err, &e) {
@@ -40,11 +41,22 @@ func ToLogRecord(err error) LogRecord {
 		File:    e.file,
 		Line:    e.line,
 	}
+
+	// Merge all data sources for the log.
+	allSafe := make(map[string]any)
 	if e.data != nil {
-		rec.Data = ToMap(e.data)
+		for k, v := range ToMap(e.data) {
+			allSafe[k] = v
+		}
 	}
-	if e.debug != nil {
-		rec.Debug = ToMap(e.debug)
+	for k, v := range e.safe {
+		allSafe[k] = v
+	}
+	if len(allSafe) > 0 {
+		rec.Data = allSafe
+	}
+	if len(e.debug) > 0 {
+		rec.Debug = e.debug
 	}
 	if e.cause != nil {
 		rec.Cause = e.cause.Error()
@@ -84,8 +96,11 @@ func SlogAttrs(err error) []any {
 	if e.data != nil {
 		attrs = append(attrs, slog.Any("error.data", ToMap(e.data)))
 	}
-	if e.debug != nil {
-		attrs = append(attrs, slog.Any("error.debug", ToMap(e.debug)))
+	if len(e.safe) > 0 {
+		attrs = append(attrs, slog.Any("error.safe", e.safe))
+	}
+	if len(e.debug) > 0 {
+		attrs = append(attrs, slog.Any("error.debug", e.debug))
 	}
 	if e.cause != nil {
 		attrs = append(attrs, slog.String("error.cause", e.cause.Error()))

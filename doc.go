@@ -1,67 +1,70 @@
-// Package bang provides structured, classified errors with flexible construction patterns.
-//
-// # Design Philosophy
-//
-// bang is built around the idea that errors should be easy to create, carry rich metadata,
-// and support both human-readable output (HTTP responses) and machine-readable output (logs, metrics).
-//
-// Every error has a Class (category), a Code (unique identifier), and standard fields for
-// Title, Message, Data, and Debug information. File and line are captured automatically.
+// Package bang provides structured, classified errors with fluent construction,
+// registration, RFC 7807 HTTP responses, and structured logging.
 //
 // # Quick Start
 //
-// Direct usage with shorthand constructors:
+//	// Direct usage — minimal calls
+//	bang.NotFound().Code("users.get_by_id")
+//	bang.Database().Wrap(err).Code("users.create").Debug("email", email)
 //
-//	return bang.NotFound("users.get_by_id")
-//	return bang.NotFound(err, "users.get_by_id")
-//	return bang.DatabaseError(err).DebugKV("id", id)
+//	// Fluent builder
+//	bang.NotFound().Wrap(err).
+//	    Safe("key", "value").
+//	    Debug("query", q).
+//	    Code("users.get")
 //
-// Module prefix for a package:
+// # Registration
 //
-//	var Mod = bang.NewModule("orders.repo")
-//	return Mod.NotFound(err, "get_by_id")  // code → "orders.repo.get_by_id"
+//	// Register messages
+//	bang.MustRegisterMessages(map[string]string{
+//	    "task.not_found": "Task '{{.key}}' not found",
+//	})
 //
-// Pre-defined callable error factories:
+//	// Register full config
+//	bang.MustRegisterCodes(map[string]bang.CodeCfg{
+//	    "task.not_found": {
+//	        Class: bang.ClassNotFound,
+//	        Msg:   "Task '{{.key}}' not found",
+//	    },
+//	})
 //
-//	var ErrUserNotFound = bang.Define(bang.ClassNotFound, "users.not_found")
+//	// Factory
+//	var TaskNotFound = bang.Factory("task.not_found")
+//	TaskNotFound().Debug(...)
 //
-//	return ErrUserNotFound()
-//	return ErrUserNotFound(err)
-//	return ErrUserNotFound(err).Msgf("user %s not found", id)
+//	// Register builder
+//	var TaskNotFound = bang.Register("task.not_found").
+//	    Class(bang.ClassNotFound).
+//	    Message("Task '{{.key}}' not found").
+//	    New()
 //
-// Typed data factories:
+// # Typed data
 //
-//	var ErrOrderFailed = bang.DefineTyped[OrderData](bang.ClassDatabaseError, "orders.save_failed")
+//	var TaskNotFound = bang.RegisterTyped[TaskNotFoundData]("task.not_found").
+//	    Class(bang.ClassNotFound).
+//	    Message("Task '{{.task_id}}' not found").
+//	    New()
+//	TaskNotFound(TaskNotFoundData{TaskID: "123"})
 //
-//	return ErrOrderFailed().Data(OrderData{OrderID: id})
-//	return ErrOrderFailed(err).Data(OrderData{OrderID: id})
+// # Validation
 //
-// Message templates with placeholders:
+//	bang.Validation().Code("users.register").
+//	    Field("email", "email_format", "Введите корректный email.").
+//	    Field("password", "min_length", "Пароль — не менее 8 символов.")
 //
-//	var ErrProductMissing = bang.Define(bang.ClassNotFound, "products.missing",
-//	    bang.WithMsgTpl("товар {sku} не найден на складе {warehouse}"),
-//	)
-//	return ErrProductMissing().DebugKV("sku", "X1", "warehouse", "msk-1")
-//	// message → "товар X1 не найден на складе msk-1"
-//
-// Validation errors:
-//
-//	return bang.Validation("users.register").
-//	    Field("email", "email_format", "Please enter a valid email.").
-//	    Field("password", "min_length", "Password must be at least 8 characters.")
-//
-// HTTP response (RFC 7807):
+// # HTTP (RFC 7807)
 //
 //	bang.WriteHTTP(w, err, bang.HTTPResponseOptions{Instance: r.URL.Path})
 //
-// Logging:
+// # Logging
 //
-//	slog.Error("operation failed", bang.SlogAttrs(err)...)
+//	slog.Error("op failed", bang.SlogAttrs(err)...)
+//	bang.SlogError(logger, "op failed", err)
 //
-// Error inspection:
+// # Inspection
 //
 //	bang.HasClass(err, bang.ClassNotFound)
 //	bang.HasCode(err, "users.not_found")
-//	ErrUserNotFound.Is(err)
+//	errors.Is(err, bang.NotFound())
 //	data, ok := bang.GetData[OrderData](err)
 package bang

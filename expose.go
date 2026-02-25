@@ -3,7 +3,7 @@ package bang
 import "reflect"
 
 // FilterSafe extracts only fields tagged with `expose:"true"` from a struct.
-// Maps are returned as-is (considered safe when passed as Data).
+// Maps are returned as-is (considered safe when passed as Safe data).
 func FilterSafe(v any) map[string]any {
 	if v == nil {
 		return nil

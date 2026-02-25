@@ -2,61 +2,77 @@ package bang
 
 import "errors"
 
-// applyArgs parses flexible constructor arguments: any combination of error and string.
-func applyArgs(e *Error, args []any) {
-	for _, arg := range args {
-		switch v := arg.(type) {
-		case error:
-			e.cause = v
-		case string:
-			e.code = v
-		}
-	}
-}
+// ─── Shorthand constructors ─────────────────────────────────────────────────
+// Each returns a new *Error with the appropriate class. Use the fluent builder
+// to attach wrap, code, safe/debug data, etc.
+//
+//   bang.NotFound()
+//   bang.NotFound().Wrap(err).Code("users.get").Debug("id", id)
+//   bang.Database().Wrap(err).Code("repo.save")
 
-func NewFromClass(class Class, callerSkip int, args []any) *Error {
-	return newFromClass(class, callerSkip+1, args)
-}
-func newFromClass(class Class, callerSkip int, args []any) *Error {
-	e := newError(class, callerSkip+1)
-	applyArgs(e, args)
+func InternalServer() *Error       { return newError(ClassInternalServer, 1) }
+func NotFound() *Error             { return newError(ClassNotFound, 1) }
+func BadRequest() *Error           { return newError(ClassBadRequest, 1) }
+func Unauthorized() *Error         { return newError(ClassUnauthorized, 1) }
+func Forbidden() *Error            { return newError(ClassForbidden, 1) }
+func Conflict() *Error             { return newError(ClassConflict, 1) }
+func TooManyRequests() *Error      { return newError(ClassTooManyRequests, 1) }
+func Database() *Error             { return newError(ClassDatabase, 1) }
+func DuplicateKey() *Error         { return newError(ClassDuplicateKey, 1) }
+func ForeignKeyViolation() *Error  { return newError(ClassForeignKeyViolation, 1) }
+func ExternalService() *Error      { return newError(ClassExternalService, 1) }
+func ExternalServiceError() *Error { return newError(ClassExternalService, 1) }
+func Network() *Error              { return newError(ClassNetwork, 1) }
+func NetworkError() *Error         { return newError(ClassNetwork, 1) }
+func Timeout() *Error              { return newError(ClassTimeout, 1) }
+func TimeoutError() *Error         { return newError(ClassTimeout, 1) }
+func Serialization() *Error        { return newError(ClassSerialization, 1) }
+func SerializationError() *Error   { return newError(ClassSerialization, 1) }
+func Unexpected() *Error           { return newError(ClassUnexpected, 1) }
+func NotImplemented() *Error       { return newError(ClassNotImplemented, 1) }
+func Locked() *Error               { return newError(ClassLocked, 1) }
+
+// New creates an error from a registered code. If the code has a registered
+// CodeCfg, its class/title/message/httpCode are applied. If only a message
+// is registered, it becomes the message template. If the code is not registered
+// at all, ClassUnexpected is used with the code set.
+func New(code string) *Error {
+	e := newError(ClassUnexpected, 1)
+	e.code = code
+
+	// Apply registered code config.
+	if cfg, ok := codeRegistry[code]; ok {
+		if cfg.Class != "" {
+			meta := getClassMeta(cfg.Class)
+			e.class = cfg.Class
+			e.title = meta.Title
+			e.message = meta.Message
+		}
+		if cfg.Title != "" {
+			e.title = cfg.Title
+		}
+		if cfg.Msg != "" {
+			e.msgTpl = cfg.Msg
+			e.resolveTemplateIfReady()
+		}
+		if cfg.HTTPCode != 0 {
+			e.httpStatus = cfg.HTTPCode
+		}
+		return e
+	}
+
+	// Apply registered message.
+	if msg, ok := messageRegistry[code]; ok {
+		e.msgTpl = msg
+		e.resolveTemplateIfReady()
+	}
+
 	return e
 }
 
-// ─── Shorthand constructors ─────────────────────────────────────────────────
-// Each accepts any combination of arguments:
-//   ()                 — default code, no wrap
-//   ("code")           — custom code
-//   (err)              — wrap error, default code
-//   (err, "code")      — wrap error + custom code
-
-func InternalServer(args ...any) *Error  { return newFromClass(ClassInternalServer, 1, args) }
-func NotFound(args ...any) *Error        { return newFromClass(ClassNotFound, 1, args) }
-func Unauthorized(args ...any) *Error    { return newFromClass(ClassUnauthorized, 1, args) }
-func Forbidden(args ...any) *Error       { return newFromClass(ClassForbidden, 1, args) }
-func Conflict(args ...any) *Error        { return newFromClass(ClassConflict, 1, args) }
-func TooManyRequests(args ...any) *Error { return newFromClass(ClassTooManyRequests, 1, args) }
-
-func DatabaseError(args ...any) *Error       { return newFromClass(ClassDatabaseError, 1, args) }
-func DuplicateKey(args ...any) *Error        { return newFromClass(ClassDuplicateKey, 1, args) }
-func ForeignKeyViolation(args ...any) *Error { return newFromClass(ClassForeignKeyViolation, 1, args) }
-
-func ExternalServiceError(args ...any) *Error {
-	return newFromClass(ClassExternalServiceError, 1, args)
-}
-func NetworkError(args ...any) *Error { return newFromClass(ClassNetworkError, 1, args) }
-func TimeoutError(args ...any) *Error { return newFromClass(ClassTimeoutError, 1, args) }
-
-func SerializationError(args ...any) *Error { return newFromClass(ClassSerializationError, 1, args) }
-func Unexpected(args ...any) *Error         { return newFromClass(ClassUnexpected, 1, args) }
-
-func BadRequest(args ...any) *Error     { return newFromClass(ClassBadRequest, 1, args) }
-func NotImplemented(args ...any) *Error { return newFromClass(ClassNotImplemented, 1, args) }
-func Locked(args ...any) *Error         { return newFromClass(ClassLocked, 1, args) }
-
-// New creates an error with an arbitrary class.
-func New(class Class, args ...any) *Error {
-	return newFromClass(class, 1, args)
+// FromClass creates an error with an arbitrary class.
+func FromClass(class Class) *Error {
+	return newError(class, 1)
 }
 
 // WrapUnknown wraps a non-bang error as ClassUnexpected.
@@ -72,5 +88,3 @@ func WrapUnknown(err error) *Error {
 	}
 	return newError(ClassUnexpected, 1).Wrap(err)
 }
-
-var ErrNotFound = NotFound()

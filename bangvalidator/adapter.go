@@ -100,7 +100,7 @@ func (val *Validator) Struct(code string, obj any) *bang.Error {
 	ves, ok := err.(validator.ValidationErrors)
 	if !ok {
 		// Not a ValidationErrors (e.g., InvalidValidationError) → internal error.
-		return bang.InternalServer(err, "bangval.invalid_struct")
+		return bang.InternalServer().Wrap(err).Code("bangval.invalid_struct")
 	}
 
 	if len(ves) == 0 {
@@ -112,7 +112,7 @@ func (val *Validator) Struct(code string, obj any) *bang.Error {
 		structType = structType.Elem()
 	}
 
-	e := bang.Validation(code)
+	e := bang.Validation().Code(code)
 	for _, fe := range ves {
 		key := buildFieldPath(fe, structType)
 		rule := fe.Tag()

@@ -8,6 +8,8 @@ import (
 
 // WrapDBError wraps a database error into an appropriate bang class.
 // Returns nil if err is nil.
+//
+//	bang.WrapDBError(err).Code("users.repo.get").Debug("id", id)
 func WrapDBError(err error) *Error {
 	if err == nil {
 		return nil
@@ -17,7 +19,7 @@ func WrapDBError(err error) *Error {
 
 func classifyDBError(err error) Class {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return ClassTimeoutError
+		return ClassTimeout
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
@@ -28,12 +30,14 @@ func classifyDBError(err error) Class {
 	case strings.Contains(msg, "foreign key") || strings.Contains(msg, "23503"):
 		return ClassForeignKeyViolation
 	default:
-		return ClassDatabaseError
+		return ClassDatabase
 	}
 }
 
 // WrapRedisError wraps a Redis client error into an appropriate bang class.
 // Returns nil if err is nil.
+//
+//	bang.WrapRedisError(err).Code("cache.session.get").Debug("key", key)
 func WrapRedisError(err error) *Error {
 	if err == nil {
 		return nil
@@ -43,17 +47,21 @@ func WrapRedisError(err error) *Error {
 
 func classifyRedisError(err error) Class {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return ClassTimeoutError
+		return ClassTimeout
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
 	case msg == "redis: nil" || strings.Contains(msg, "nil"):
 		return ClassNotFound
 	case strings.Contains(msg, "connection refused") || strings.Contains(msg, "connect:") || strings.Contains(msg, "i/o timeout"):
-		return ClassNetworkError
+		return ClassNetwork
 	case strings.Contains(msg, "timeout"):
-		return ClassTimeoutError
+		return ClassTimeout
 	default:
-		return ClassDatabaseError
+		return ClassDatabase
 	}
+}
+
+func WrapValidationError(err error) *Error {
+	return bindErr(err)
 }

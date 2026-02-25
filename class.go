@@ -2,8 +2,11 @@ package bang
 
 import "net/http"
 
-// Class represents a category of error. Each class has a default code, title, message,
-// and HTTP status mapping.
+// Map is a convenience alias for untyped key-value data.
+type Map = map[string]any
+
+// Class represents a category of error. Each class has default code, title,
+// message, and HTTP status mapping.
 type Class string
 
 const (
@@ -16,21 +19,22 @@ const (
 	ClassConflict        Class = "conflict"
 	ClassTooManyRequests Class = "too_many_requests"
 
-	ClassDatabaseError       Class = "database_error"
+	ClassDatabase Class = "database"
+
 	ClassDuplicateKey        Class = "duplicate_key"
 	ClassForeignKeyViolation Class = "foreign_key_violation"
 
-	ClassExternalServiceError Class = "external_service_error"
-	ClassNetworkError         Class = "network_error"
-	ClassTimeoutError         Class = "timeout_error"
+	ClassExternalService Class = "external_service"
+	ClassNetwork         Class = "network"
+	ClassTimeout         Class = "timeout"
 
-	ClassSerializationError Class = "serialization_error"
-	ClassUnexpected         Class = "unexpected"
-	ClassNotImplemented     Class = "not_implemented"
-	ClassLocked             Class = "locked"
+	ClassSerialization  Class = "serialization"
+	ClassUnexpected     Class = "unexpected"
+	ClassNotImplemented Class = "not_implemented"
+	ClassLocked         Class = "locked"
 )
 
-// classMeta holds the default metadata for each class (internal).
+// classMeta holds default metadata for each class.
 type classMeta struct {
 	DefaultCode string
 	Title       string
@@ -48,16 +52,16 @@ var classRegistry = map[Class]classMeta{
 	ClassConflict:        {"conflict", "Conflict", "The request conflicts with the current state.", http.StatusConflict},
 	ClassTooManyRequests: {"too_many_requests", "Too Many Requests", "Rate limit exceeded. Please try again later.", http.StatusTooManyRequests},
 
-	ClassDatabaseError:       {"database_error", "Database Error", "A database error occurred.", http.StatusInternalServerError},
+	ClassDatabase:            {"database", "Database Error", "A database error occurred.", http.StatusInternalServerError},
 	ClassDuplicateKey:        {"duplicate_key", "Duplicate Entry", "A record with the same key already exists.", http.StatusConflict},
 	ClassForeignKeyViolation: {"foreign_key_violation", "Reference Error", "The referenced resource does not exist.", http.StatusUnprocessableEntity},
 
-	ClassExternalServiceError: {"external_service_error", "External Service Error", "An external service returned an error.", http.StatusBadGateway},
-	ClassNetworkError:         {"network_error", "Network Error", "A network error occurred.", http.StatusBadGateway},
-	ClassTimeoutError:         {"timeout_error", "Timeout", "The operation timed out.", http.StatusGatewayTimeout},
+	ClassExternalService: {"external_service", "External Service Error", "An external service returned an error.", http.StatusBadGateway},
+	ClassNetwork:         {"network", "Network Error", "A network error occurred.", http.StatusBadGateway},
+	ClassTimeout:         {"timeout", "Timeout", "The operation timed out.", http.StatusGatewayTimeout},
 
-	ClassSerializationError: {"serialization_error", "Serialization Error", "Failed to serialize or deserialize data.", http.StatusInternalServerError},
-	ClassUnexpected:         {"unexpected", "Unexpected Error", "An unexpected error occurred.", http.StatusInternalServerError},
+	ClassSerialization: {"serialization", "Serialization Error", "Failed to serialize or deserialize data.", http.StatusInternalServerError},
+	ClassUnexpected:    {"unexpected", "Unexpected Error", "An unexpected error occurred.", http.StatusInternalServerError},
 
 	ClassNotImplemented: {"not_implemented", "Not Implemented", "Not Implemented.", http.StatusNotImplemented},
 	ClassLocked:         {"locked", "Locked", "Locked.", http.StatusLocked},
@@ -88,7 +92,7 @@ func getClassMeta(class Class) classMeta {
 	return classRegistry[ClassUnexpected]
 }
 
-// HTTPStatus returns the HTTP status code mapped to this class.
+// HTTPStatus returns the HTTP status code for this class.
 func (c Class) HTTPStatus() int { return getClassMeta(c).HTTPStatus }
 
 // String implements fmt.Stringer.

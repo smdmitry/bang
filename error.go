@@ -14,18 +14,20 @@ type Error struct {
 	code    string
 	title   string
 	message string
-	msgTpl  string // message template with {key} placeholders
+	msgTpl  string // message template with {{.key}} placeholders
 
-	data  any // typed data (struct with expose tags)
-	debug any // unsafe debug data
+	data  any            // typed data (struct with expose tags)
+	safe  map[string]any // user-visible untyped data
+	debug map[string]any // debug-only untyped data
 
 	cause error // wrapped error
 
 	validationFields []ValidationField
 
-	stack []uintptr
-	file  string // auto-captured source file
-	line  int    // auto-captured source line
+	stack      []uintptr
+	file       string // auto-captured source file
+	line       int    // auto-captured source line
+	httpStatus int    // optional HTTP status override
 }
 
 // newError creates a new Error, auto-capturing file and line of the caller.
@@ -46,9 +48,37 @@ func newError(class Class, callerSkip int) *Error {
 
 // ─── Builder methods ────────────────────────────────────────────────────────
 
+// Wrap wraps another error as the cause.
+func (e *Error) Wrap(err error) *Error {
+	if err != nil {
+		e.cause = err
+	}
+	return e
+}
+
 // Code sets a unique error code. Recommended format: module.submodule.error_descr
 func (e *Error) Code(code string) *Error {
 	e.code = code
+	// Check if this code has a registered config and apply it.
+	if cfg, ok := codeRegistry[code]; ok {
+		if cfg.Class != "" {
+			e.class = cfg.Class
+		}
+		if cfg.Title != "" {
+			e.title = cfg.Title
+		}
+		if cfg.Msg != "" {
+			e.msgTpl = cfg.Msg
+			e.resolveTemplateIfReady()
+		}
+		if cfg.HTTPCode != 0 {
+			e.httpStatus = cfg.HTTPCode
+		}
+	}
+	if msg, ok := messageRegistry[code]; ok && e.msgTpl == "" {
+		e.msgTpl = msg
+		e.resolveTemplateIfReady()
+	}
 	return e
 }
 
@@ -61,99 +91,84 @@ func (e *Error) Title(title string) *Error {
 // Msg sets a custom user-facing message.
 func (e *Error) Msg(message string) *Error {
 	e.message = message
+	e.msgTpl = message // store as template in case it has placeholders
+	e.resolveTemplateIfReady()
 	return e
 }
 
 // Msgf sets a user-facing message using fmt.Sprintf formatting.
 func (e *Error) Msgf(format string, args ...any) *Error {
 	e.message = fmt.Sprintf(format, args...)
+	e.msgTpl = "" // explicit format, no template
 	return e
 }
 
-// MsgTpl sets a message template with {key} placeholders resolved from Data and Debug.
-// Values are resolved immediately from already-set data/debug, and re-resolved
-// when Data/Debug/DebugKV is called later.
+// Safe adds user-visible key-value pairs. Keys and values alternate.
 //
-//	bang.NotFound("products.get").
-//	    DebugKV("sku", "X1", "warehouse", "msk-1").
-//	    MsgTpl("товар {sku} не найден на складе {warehouse}")
-func (e *Error) MsgTpl(tpl string) *Error {
-	e.msgTpl = tpl
-	e.message = e.resolveTemplate(tpl)
+//	e.Safe("key", "value", "key2", "value2")
+func (e *Error) Safe(kvs ...any) *Error {
+	if e.safe == nil {
+		e.safe = make(map[string]any)
+	}
+	for i := 0; i+1 < len(kvs); i += 2 {
+		if k, ok := kvs[i].(string); ok {
+			e.safe[k] = kvs[i+1]
+		}
+	}
+	e.resolveTemplateIfReady()
 	return e
+}
+
+// SafeMap adds user-visible key-value pairs from a map.
+func (e *Error) SafeMap(m Map) *Error {
+	if e.safe == nil {
+		e.safe = make(map[string]any)
+	}
+	for k, v := range m {
+		e.safe[k] = v
+	}
+	e.resolveTemplateIfReady()
+	return e
+}
+
+// Debug adds debug-only key-value pairs (unsafe, not shown to users).
+//
+//	e.Debug("keyd", "valued", "key2", "value2")
+func (e *Error) Debug(kvs ...any) *Error {
+	if e.debug == nil {
+		e.debug = make(map[string]any)
+	}
+	for i := 0; i+1 < len(kvs); i += 2 {
+		if k, ok := kvs[i].(string); ok {
+			e.debug[k] = kvs[i+1]
+		}
+	}
+	e.resolveTemplateIfReady()
+	return e
+}
+
+// DebugMap adds debug-only key-value pairs from a map.
+func (e *Error) DebugMap(m Map) *Error {
+	if e.debug == nil {
+		e.debug = make(map[string]any)
+	}
+	for k, v := range m {
+		e.debug[k] = v
+	}
+	e.resolveTemplateIfReady()
+	return e
+}
+
+// DebugKV is an alias for Debug.
+func (e *Error) DebugKV(kvs ...any) *Error {
+	return e.Debug(kvs...)
 }
 
 // Data attaches typed data. The struct should use `expose:"true"` tags on fields
-// that are safe to show to end users.
+// that are safe to show to end users, and `json` tags for serialization names.
 func (e *Error) Data(data any) *Error {
 	e.data = data
-	if e.msgTpl != "" {
-		e.message = e.resolveTemplate(e.msgTpl)
-	}
-	return e
-}
-
-// Debug attaches debug-only data (unsafe, never exposed to end users in production).
-//
-// Supported forms:
-//
-//	Debug(map[string]any{"id": id})
-//	Debug("id", id, "query", query)
-//	Debug(map[string]any{"id": id}, "extra", value)
-func (e *Error) Debug(args ...any) *Error {
-	if len(args) == 0 {
-		return e
-	}
-
-	// Fast path: exactly one map
-	if len(args) == 1 {
-		if mm, ok := args[0].(map[string]any); ok {
-			e.debug = mm
-			if e.msgTpl != "" {
-				e.message = e.resolveTemplate(e.msgTpl)
-			}
-			return e
-		}
-	}
-
-	m := make(map[string]any)
-
-	// KV list + optional embedded maps
-	for i := 0; i < len(args); {
-		switch v := args[i].(type) {
-		case map[string]any:
-			for k, val := range v {
-				m[k] = val
-			}
-			i++
-
-		case string:
-			if i+1 < len(args) {
-				m[v] = args[i+1]
-				i += 2
-			} else {
-				i++ // dangling key, ignore
-			}
-
-		default:
-			i++ // ignore unknown item
-		}
-	}
-
-	e.debug = m
-
-	if e.msgTpl != "" {
-		e.message = e.resolveTemplate(e.msgTpl)
-	}
-	return e
-}
-
-// Optional alias for backward compatibility.
-//func (e *Error) DebugKV(kvs ...any) *Error { return e.Debug(kvs...) }
-
-// Wrap wraps another error as the cause.
-func (e *Error) Wrap(err error) *Error {
-	e.cause = err
+	e.resolveTemplateIfReady()
 	return e
 }
 
@@ -166,29 +181,76 @@ func (e *Error) WithStack() *Error {
 	return e
 }
 
+// HTTPStatus overrides the default HTTP status for this error.
+func (e *Error) HTTPStatus(code int) *Error {
+	e.httpStatus = code
+	return e
+}
+
 // ─── Template resolution ────────────────────────────────────────────────────
 
-func (e *Error) resolveTemplate(tpl string) string {
+func (e *Error) resolveTemplateIfReady() {
+	if e.msgTpl == "" {
+		return
+	}
+	e.message = resolveTemplate(e.msgTpl, e.allTemplateValues())
+}
+
+func (e *Error) allTemplateValues() map[string]any {
 	values := make(map[string]any)
 	if e.data != nil {
 		for k, v := range ToMap(e.data) {
 			values[k] = v
 		}
 	}
-	if e.debug != nil {
-		for k, v := range ToMap(e.debug) {
+	if e.safe != nil {
+		for k, v := range e.safe {
 			values[k] = v
 		}
 	}
-	return replacePlaceholders(tpl, values)
+	if e.debug != nil {
+		for k, v := range e.debug {
+			values[k] = v
+		}
+	}
+	return values
 }
 
-func replacePlaceholders(tpl string, values map[string]any) string {
+// resolveTemplate replaces {{.key}} placeholders in the template string.
+func resolveTemplate(tpl string, values map[string]any) string {
+	if len(values) == 0 {
+		return handleMissingKeys(tpl)
+	}
 	result := tpl
 	for k, v := range values {
-		result = strings.ReplaceAll(result, "{"+k+"}", fmt.Sprint(v))
+		result = strings.ReplaceAll(result, "{{."+k+"}}", fmt.Sprint(v))
 	}
-	return result
+	return handleMissingKeys(result)
+}
+
+func handleMissingKeys(s string) string {
+	mode := getTemplateMissingKeyMode()
+	switch mode {
+	case MissingKeyRemove:
+		// Remove unresolved {{.xxx}} placeholders.
+		for {
+			start := strings.Index(s, "{{.")
+			if start == -1 {
+				break
+			}
+			end := strings.Index(s[start:], "}}")
+			if end == -1 {
+				break
+			}
+			s = s[:start] + s[start+end+2:]
+		}
+	case MissingKeyError:
+		// In error mode, we could panic, but for safety we just keep as-is.
+		// The registration step validates templates.
+	default:
+		// MissingKeyKeep — leave as is (default).
+	}
+	return s
 }
 
 // ─── error interface ────────────────────────────────────────────────────────
@@ -214,35 +276,83 @@ func (e *Error) Error() string {
 // Unwrap returns the wrapped error for errors.Is / errors.As support.
 func (e *Error) Unwrap() error { return e.cause }
 
-// ─── Accessors ──────────────────────────────────────────────────────────────
-
-func (e *Error) GetClass() Class                        { return e.class }
-func (e *Error) GetCode() string                        { return e.code }
-func (e *Error) GetTitle() string                       { return e.title }
-func (e *Error) GetMessage() string                     { return e.message }
-func (e *Error) GetData() any                           { return e.data }
-func (e *Error) GetDebug() any                          { return e.debug }
-func (e *Error) GetCause() error                        { return e.cause }
-func (e *Error) GetStack() []uintptr                    { return e.stack }
-func (e *Error) GetFile() string                        { return e.file }
-func (e *Error) GetLine() int                           { return e.line }
-func (e *Error) GetValidationFields() []ValidationField { return e.validationFields }
-
-// ─── Inspection helpers ─────────────────────────────────────────────────────
-
-// Is reports whether any error in the chain matches by code or class.
+// Is reports whether target matches this error (by code or class).
+// This enables errors.Is(err, bang.NotFound()) style checks.
 func (e *Error) Is(target error) bool {
 	var t *Error
 	if !errors.As(target, &t) {
 		return false
 	}
-	if t.code != "" && e.code == t.code {
+	if t.code != "" && e.code != "" && e.code == t.code {
 		return true
 	}
 	return e.class == t.class
 }
 
-// HasClass reports whether this error has the given class.
+// ─── Accessors ──────────────────────────────────────────────────────────────
+
+func (e *Error) GetClass() Class  { return e.class }
+func (e *Error) GetCode() string  { return e.code }
+func (e *Error) GetTitle() string { return e.title }
+func (e *Error) GetMessage() string {
+	if e.message == "" {
+		return getClassMeta(e.class).Message
+	}
+	return e.message
+}
+func (e *Error) GetData() any             { return e.data }
+func (e *Error) GetSafe() map[string]any  { return e.safe }
+func (e *Error) GetDebug() map[string]any { return e.debug }
+func (e *Error) GetCause() error          { return e.cause }
+func (e *Error) GetStack() []uintptr      { return e.stack }
+func (e *Error) GetFile() string          { return e.file }
+func (e *Error) GetLine() int             { return e.line }
+func (e *Error) GetHTTPStatus() int       { return e.httpStatus }
+func (e *Error) GetValidationFields() []ValidationField {
+	return e.validationFields
+}
+
+// SafeData returns all user-visible data: expose:"true" fields from typed Data
+// merged with Safe map.
+func (e *Error) SafeData() map[string]any {
+	result := make(map[string]any)
+	if e.data != nil {
+		for k, v := range FilterSafe(e.data) {
+			result[k] = v
+		}
+	}
+	for k, v := range e.safe {
+		result[k] = v
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// AllData returns all data merged: typed Data (all fields) + Safe + Debug.
+func (e *Error) AllData() map[string]any {
+	result := make(map[string]any)
+	if e.data != nil {
+		for k, v := range ToMap(e.data) {
+			result[k] = v
+		}
+	}
+	for k, v := range e.safe {
+		result[k] = v
+	}
+	for k, v := range e.debug {
+		result[k] = v
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// ─── Inspection helpers ─────────────────────────────────────────────────────
+
+// HasClass reports whether err has the given class.
 func HasClass(err error, class Class) bool {
 	var e *Error
 	if errors.As(err, &e) {
@@ -251,7 +361,7 @@ func HasClass(err error, class Class) bool {
 	return false
 }
 
-// HasCode reports whether this error has the given code.
+// HasCode reports whether err has the given code.
 func HasCode(err error, code string) bool {
 	var e *Error
 	if errors.As(err, &e) {

@@ -55,9 +55,14 @@ func ToHTTP(err error, opts HTTPResponseOptions) ProblemDetail {
 		e = WrapUnknown(err)
 	}
 
+	status := e.class.HTTPStatus()
+	if e.httpStatus != 0 {
+		status = e.httpStatus
+	}
+
 	pd := ProblemDetail{
 		Type:   fmt.Sprintf("urn:error:%s:%s", e.class, e.code),
-		Status: e.class.HTTPStatus(),
+		Status: status,
 		Title:  e.title,
 		Detail: e.message,
 	}
@@ -71,10 +76,13 @@ func ToHTTP(err error, opts HTTPResponseOptions) ProblemDetail {
 		pd.ErrorType = "business"
 	}
 
-	if e.data != nil {
-		pd.Details = FilterSafe(e.data)
+	// Safe data: expose:"true" fields from typed Data + Safe map.
+	safeData := e.SafeData()
+	if len(safeData) > 0 {
+		pd.Details = safeData
 	}
 
+	// Validation errors (without rule — rule is unsafe).
 	if len(e.validationFields) > 0 {
 		pd.Errors = make([]ValidationError, len(e.validationFields))
 		for i, vf := range e.validationFields {
@@ -82,20 +90,11 @@ func ToHTTP(err error, opts HTTPResponseOptions) ProblemDetail {
 		}
 	}
 
+	// Debug info (only for development builds or admin users).
 	if opts.ShowDebug {
 		debug := &DebugInfo{File: e.file, Line: e.line}
 
-		allData := make(map[string]any)
-		if e.data != nil {
-			for k, v := range ToMap(e.data) {
-				allData[k] = v
-			}
-		}
-		if e.debug != nil {
-			for k, v := range ToMap(e.debug) {
-				allData[k] = v
-			}
-		}
+		allData := e.AllData()
 		if len(allData) > 0 {
 			debug.AllData = allData
 		}

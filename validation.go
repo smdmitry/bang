@@ -5,13 +5,17 @@ import "errors"
 // ValidationField describes a single field validation failure.
 type ValidationField struct {
 	Key    string `json:"key"`
-	Rule   string `json:"rule,omitempty"` // unsafe, hidden from user
+	Rule   string `json:"rule,omitempty"` // unsafe, hidden from user in HTTP
 	Reason string `json:"reason"`
 }
 
-// Validation creates a ClassValidation error with an optional code.
-func Validation(args ...any) *Error {
-	return newFromClass(ClassValidation, 1, args)
+// Validation creates a ClassValidation error. Optionally set a code.
+//
+//	bang.Validation().Code("users.register").
+//	    Field("email", "email_format", "Введите корректный email.").
+//	    Field("password", "min_length", "Пароль — не менее 8 символов.")
+func Validation() *Error {
+	return newError(ClassValidation, 1)
 }
 
 // Field adds a validation field error. Returns the same *Error for chaining.
