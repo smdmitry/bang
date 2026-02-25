@@ -47,26 +47,70 @@ func collectValidationErrors(err error) []validator.FieldError {
 		return nil
 	}
 
-	var ves validator.ValidationErrors
-	if errors.As(err, &ves) {
-		out := make([]validator.FieldError, 0, len(ves))
-		for _, fe := range ves {
-			out = append(out, fe)
-		}
-		return out
+	out := make([]validator.FieldError, 0, 4)
+	collectValidationErrorsInto(err, 0, &out)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func collectValidationErrorsInto(err error, depth int, out *[]validator.FieldError) {
+	if err == nil {
+		return
+	}
+	if depth > 64 {
+		return
 	}
 
-	// TODO: fix this code
-	/*var sliceErr SliceValidationError
-	if errors.As(err, &sliceErr) {
-		out := make([]validator.FieldError, 0, len(sliceErr))
-		for _, nested := range sliceErr {
-			out = append(out, collectValidationErrors(nested)...)
+	if ves, ok := err.(validator.ValidationErrors); ok {
+		for _, fe := range ves {
+			*out = append(*out, fe)
 		}
-		return out
-	}*/
+		return
+	}
 
-	return nil
+	for _, nested := range validationErrorSlice(err) {
+		collectValidationErrorsInto(nested, depth+1, out)
+	}
+
+	type unwrapMany interface{ Unwrap() []error }
+	if joined, ok := err.(unwrapMany); ok {
+		for _, nested := range joined.Unwrap() {
+			collectValidationErrorsInto(nested, depth+1, out)
+		}
+		return
+	}
+
+	collectValidationErrorsInto(errors.Unwrap(err), depth+1, out)
+}
+
+func validationErrorSlice(err error) []error {
+	v := reflect.ValueOf(err)
+	for v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return nil
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Slice && v.Kind() != reflect.Array {
+		return nil
+	}
+
+	out := make([]error, 0, v.Len())
+	for i := 0; i < v.Len(); i++ {
+		item := v.Index(i)
+		if !item.IsValid() || !item.CanInterface() {
+			continue
+		}
+		if (item.Kind() == reflect.Interface || item.Kind() == reflect.Pointer) && item.IsNil() {
+			continue
+		}
+		if nested, ok := item.Interface().(error); ok && nested != nil {
+			out = append(out, nested)
+		}
+	}
+	return out
 }
 
 func validationFieldKey(fe validator.FieldError) string {

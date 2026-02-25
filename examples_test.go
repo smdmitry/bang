@@ -132,7 +132,6 @@ func Example_module() {
 	var err error
 
 	_ = ordersRepo.NotFound().Code("get_by_id")
-	_ = ordersRepo.Database().Wrap(err)
 	_ = ordersRepo.WrapDBError(err, "update")
 	_ = ordersRepo.WrapRedisError(err, "cache")
 }
