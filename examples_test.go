@@ -123,12 +123,12 @@ func Example_typedFactory() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  5. MODULE
+//  5. PREFIX FACTORY
 // ═══════════════════════════════════════════════════════════════════════════
 
-var ordersRepo = bang.NewModule("orders.repo")
+var ordersRepo = bang.Prefix("orders.repo")
 
-func Example_module() {
+func Example_prefixFactory() {
 	var err error
 
 	_ = ordersRepo.NotFound().Code("get_by_id")
@@ -170,7 +170,7 @@ func Example_adapters() {
 	// WrapDBError: auto-class
 	_ = bang.WrapDBError(err).Code("users.repo.get").Debug("id", "u1")
 
-	// Через Module
+	// Через Prefix factory
 	_ = ordersRepo.WrapDBError(err, "get_by_id").Debug("id", "ord-1")
 
 	// WrapRedisError

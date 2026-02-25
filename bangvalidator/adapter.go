@@ -281,3 +281,23 @@ func lcFirst(s string) string {
 	r[0] = unicode.ToLower(r[0])
 	return string(r)
 }
+
+// --
+
+type StructValidator[T any] struct {
+	Struct T
+	SL     validator.StructLevel
+}
+
+func SValidator[T any](sl validator.StructLevel) *StructValidator[T] {
+	Struct := sl.Current().Interface().(T)
+	validator := StructValidator[T]{
+		Struct: Struct,
+		SL:     sl,
+	}
+	return &validator
+}
+
+func (v *StructValidator[T]) Error(fieldName string, structFieldName string, msg string) {
+	v.SL.ReportError(v.Struct, fieldName, structFieldName, TagMsgInParam, msg)
+}

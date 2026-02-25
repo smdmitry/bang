@@ -102,6 +102,52 @@ func TestBuilderChaining(t *testing.T) {
 	}
 }
 
+func TestWrapInheritBangErrorFields(t *testing.T) {
+	parent := bang.NotFound().
+		Code("users.get_by_id").
+		Title("User Not Found").
+		Msg("User {{.user_id}} not found").
+		Safe("user_id", "u-1")
+
+	e := bang.InternalServer().Wrap(parent)
+
+	if e.GetClass() != bang.ClassNotFound {
+		t.Errorf("class = %v", e.GetClass())
+	}
+	if e.GetCode() != "users.get_by_id" {
+		t.Errorf("code = %q", e.GetCode())
+	}
+	if e.GetTitle() != "User Not Found" {
+		t.Errorf("title = %q", e.GetTitle())
+	}
+	if e.GetMessage() != "User u-1 not found" {
+		t.Errorf("message = %q", e.GetMessage())
+	}
+}
+
+func TestWrapInheritBangErrorCanOverride(t *testing.T) {
+	parent := bang.NotFound().
+		Code("users.get_by_id").
+		Title("User Not Found").
+		Msg("User not found")
+
+	e := bang.InternalServer().
+		Wrap(parent).
+		Code("users.lookup_failed").
+		Title("Lookup Failed").
+		Msg("Lookup failed")
+
+	if e.GetCode() != "users.lookup_failed" {
+		t.Errorf("code = %q", e.GetCode())
+	}
+	if e.GetTitle() != "Lookup Failed" {
+		t.Errorf("title = %q", e.GetTitle())
+	}
+	if e.GetMessage() != "Lookup failed" {
+		t.Errorf("message = %q", e.GetMessage())
+	}
+}
+
 func TestSafeMap(t *testing.T) {
 	e := bang.NotFound().SafeMap(bang.Map{"k1": "v1", "k2": "v2"})
 	safe := e.GetSafe()
@@ -426,36 +472,65 @@ func TestCodeMethodAppliesRegistry(t *testing.T) {
 	}
 }
 
-// ─── Module ─────────────────────────────────────────────────────────────────
+// ─── Prefix factory ─────────────────────────────────────────────────────────
 
-func TestModule(t *testing.T) {
-	mod := bang.NewModule("orders.repo")
-	e := mod.NotFound().Code("get_by_id")
-	// Module sets prefix as code; .Code() overrides it.
-	if e.GetCode() != "get_by_id" {
-		// Actually the spec says module.Code sets the code directly,
-		// but the module constructors set prefix as default code.
-		t.Logf("code = %q (module prefix handling)", e.GetCode())
+func TestPrefixFactoryCode(t *testing.T) {
+	repoerr := bang.Prefix("orders.repo")
+	e := repoerr.Conflict().Code("archive_failed")
+	if e.GetCode() != "orders.repo.archive_failed" {
+		t.Errorf("code = %q", e.GetCode())
+	}
+	if e.GetClass() != bang.ClassConflict {
+		t.Errorf("class = %v", e.GetClass())
 	}
 }
 
-func TestModuleNew(t *testing.T) {
-	bang.ResetRegistry()
-	mod := bang.NewModule("orders.repo")
-	e := mod.NotFound()
+func TestPrefixFactoryDefaults(t *testing.T) {
+	repoerr := bang.Prefix("orders.repo").
+		Class(bang.ClassNotFound).
+		Title("Order Not Found").
+		Msg("Order {{.id}} not found")
+
+	e := repoerr.New().Safe("id", "42")
 	if e.GetCode() != "orders.repo" {
-		t.Errorf("code = %q, want orders.repo", e.GetCode())
+		t.Errorf("code = %q", e.GetCode())
+	}
+	if e.GetClass() != bang.ClassNotFound {
+		t.Errorf("class = %v", e.GetClass())
+	}
+	if e.GetTitle() != "Order Not Found" {
+		t.Errorf("title = %q", e.GetTitle())
+	}
+	if e.GetMessage() != "Order 42 not found" {
+		t.Errorf("message = %q", e.GetMessage())
 	}
 }
 
-func TestModuleWrapDBError(t *testing.T) {
-	mod := bang.NewModule("orders.repo")
-	e := mod.WrapDBError(fmt.Errorf("no rows in result set"), "get_by_id")
+func TestPrefixFactoryWrapDBError(t *testing.T) {
+	repoerr := bang.Prefix("orders.repo")
+	e := repoerr.WrapDBError(fmt.Errorf("no rows in result set"), "get_by_id")
 	if e.GetCode() != "orders.repo.get_by_id" {
 		t.Errorf("code = %q", e.GetCode())
 	}
 	if e.GetClass() != bang.ClassNotFound {
 		t.Errorf("class = %v", e.GetClass())
+	}
+}
+
+func TestPrefixFactoryMainUsage(t *testing.T) {
+	repoerr := bang.Prefix("project.archive")
+	projectID := "prj-1"
+
+	e := repoerr.Conflict().
+		Code("archive_failed").
+		Msg("Проект {{.project_id}} не ожидает архивации.").
+		Safe("project_id", projectID)
+
+	if e.GetCode() != "project.archive.archive_failed" {
+		t.Errorf("code = %q", e.GetCode())
+	}
+	if e.GetMessage() != "Проект prj-1 не ожидает архивации." {
+		t.Errorf("message = %q", e.GetMessage())
 	}
 }
 
@@ -585,6 +660,36 @@ func TestToHTTPDebug(t *testing.T) {
 	}
 	if pd.DebugInfo.AllData == nil || len(pd.DebugInfo.Stack) == 0 {
 		t.Error("debug data/stack missing")
+	}
+}
+
+func TestToHTTPCauseChain(t *testing.T) {
+	c6 := bang.InternalServer().Code("c6").Msg("cause 6")
+	c5 := bang.InternalServer().Wrap(c6).Code("c5").Msg("cause 5")
+	c4 := bang.InternalServer().Wrap(c5).Code("c4").Msg("cause 4")
+	c3 := bang.InternalServer().Wrap(c4).Code("c3").Msg("cause 3")
+	c2 := bang.InternalServer().Wrap(c3).Code("c2").Msg("cause 2")
+	c1 := bang.InternalServer().Wrap(c2).Code("c1").Msg("cause 1")
+	top := bang.InternalServer().Wrap(c1).Code("top").Msg("top")
+
+	pd := bang.ToHTTP(top, bang.HTTPResponseOptions{})
+	if len(pd.Cause) != 5 {
+		t.Fatalf("cause len = %d, want 5", len(pd.Cause))
+	}
+	if pd.Cause[0].Code != "c1" || pd.Cause[4].Code != "c5" {
+		t.Errorf("unexpected cause codes: first=%q last=%q", pd.Cause[0].Code, pd.Cause[4].Code)
+	}
+	if pd.Cause[0].Detail != "cause 1" {
+		t.Errorf("detail = %q", pd.Cause[0].Detail)
+	}
+}
+
+func TestToHTTPCauseChainSkipsNonBang(t *testing.T) {
+	root := fmt.Errorf("io fail")
+	e := bang.InternalServer().Wrap(root)
+	pd := bang.ToHTTP(e, bang.HTTPResponseOptions{})
+	if len(pd.Cause) != 0 {
+		t.Fatalf("cause len = %d, want 0", len(pd.Cause))
 	}
 }
 

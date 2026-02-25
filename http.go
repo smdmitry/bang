@@ -20,8 +20,18 @@ type ProblemDetail struct {
 	ErrorType string            `json:"errorType"`
 	Details   map[string]any    `json:"details,omitempty"`
 	Errors    []ValidationError `json:"errors,omitempty"`
+	Cause     []CauseItem       `json:"cause,omitempty"`
 
 	DebugInfo *DebugInfo `json:"debug,omitempty"`
+}
+
+// CauseItem is a public cause-chain element for nested bang errors.
+type CauseItem struct {
+	Type   string `json:"type"`
+	Class  string `json:"class"`
+	Code   string `json:"code"`
+	Title  string `json:"title"`
+	Detail string `json:"detail"`
 }
 
 // ValidationError is the user-facing validation field error (rule omitted).
@@ -90,6 +100,9 @@ func ToHTTP(err error, opts HTTPResponseOptions) ProblemDetail {
 		}
 	}
 
+	// Public cause chain (only nested bang errors), max depth 5.
+	pd.Cause = buildBangCauseChain(e, 5)
+
 	// Debug info (only for development builds or admin users).
 	if opts.ShowDebug {
 		debug := &DebugInfo{File: e.file, Line: e.line}
@@ -115,6 +128,31 @@ func ToHTTP(err error, opts HTTPResponseOptions) ProblemDetail {
 	}
 
 	return pd
+}
+
+func buildBangCauseChain(e *Error, maxDepth int) []CauseItem {
+	if e == nil || maxDepth <= 0 {
+		return nil
+	}
+
+	var chain []CauseItem
+	cur := e.cause
+	for cur != nil && len(chain) < maxDepth {
+		if ce, ok := cur.(*Error); ok {
+			chain = append(chain, CauseItem{
+				Type:   fmt.Sprintf("urn:error:%s:%s", ce.class, ce.code),
+				Class:  string(ce.class),
+				Code:   ce.code,
+				Title:  ce.title,
+				Detail: ce.message,
+			})
+		}
+		cur = errors.Unwrap(cur)
+	}
+	if len(chain) == 0 {
+		return nil
+	}
+	return chain
 }
 
 // WriteHTTP writes the ProblemDetail as a JSON HTTP response.

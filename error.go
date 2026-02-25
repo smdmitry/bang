@@ -10,11 +10,12 @@ import (
 // Error is the core error type. It implements the error interface and supports
 // a fluent builder pattern for easy construction.
 type Error struct {
-	class   Class
-	code    string
-	title   string
-	message string
-	msgTpl  string // message template with {{.key}} placeholders
+	class      Class
+	codePrefix string // optional code prefix applied by prefixed factories
+	code       string
+	title      string
+	message    string
+	msgTpl     string // message template with {{.key}} placeholders
 
 	data  any            // typed data (struct with expose tags)
 	safe  map[string]any // user-visible untyped data
@@ -56,8 +57,45 @@ func (e *Error) Wrap(err error) *Error {
 	return e
 }
 
+func (e *Error) inheritParent(parent *Error) {
+	e.class = parent.class
+	e.codePrefix = parent.codePrefix
+	e.code = parent.code
+	e.title = parent.title
+	e.message = parent.message
+	e.msgTpl = parent.msgTpl
+	e.data = parent.data
+	e.httpStatus = parent.httpStatus
+
+	if len(parent.safe) > 0 {
+		e.safe = make(map[string]any, len(parent.safe))
+		for k, v := range parent.safe {
+			e.safe[k] = v
+		}
+	} else {
+		e.safe = nil
+	}
+	if len(parent.debug) > 0 {
+		e.debug = make(map[string]any, len(parent.debug))
+		for k, v := range parent.debug {
+			e.debug[k] = v
+		}
+	} else {
+		e.debug = nil
+	}
+	if len(parent.validationFields) > 0 {
+		e.validationFields = make([]ValidationField, len(parent.validationFields))
+		copy(e.validationFields, parent.validationFields)
+	} else {
+		e.validationFields = nil
+	}
+}
+
 // Code sets a unique error code. Recommended format: module.submodule.error_descr
 func (e *Error) Code(code string) *Error {
+	if e.codePrefix != "" {
+		code = joinCodePrefix(e.codePrefix, code)
+	}
 	e.code = code
 	// Check if this code has a registered config and apply it.
 	if cfg, ok := codeRegistry[code]; ok {

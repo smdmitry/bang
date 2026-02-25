@@ -1,4 +1,4 @@
-# bang — Structured Module Errors for Go
+# bang — Structured Errors for Go
 
 Гибкая библиотека ошибок с классификацией, уникальными кодами, typed data, шаблонами сообщений, RFC 7807 HTTP-ответами и структурированным логированием.
 
@@ -145,16 +145,17 @@ data, ok := TaskNotFound.GetData(err)
 // bang.Typed[TaskNotFoundData](bang.Register("task.not_found").Class(...).Message(...))
 ```
 
-## Module — общий префикс
+## Prefix factory — общий префикс
 
 ```go
-var Mod = bang.NewModule("orders.repo")
+var repoerr = bang.Prefix("orders.repo")
+var repoerrNotFound = bang.Prefix("orders.repo").Class(bang.ClassNotFound)
 
-Mod.NotFound()                              // code → "orders.repo"
-Mod.NotFound().Code("get_by_id")            // code → "get_by_id" (overrides)
-Mod.New("get_by_id")                        // code → "orders.repo.get_by_id"
-Mod.WrapDBError(err, "create")              // auto-class + code → "orders.repo.create"
-Mod.WrapRedisError(err, "cache")            // auto-class + code → "orders.repo.cache"
+repoerr.NotFound()                          // code → "orders.repo"
+repoerr.Conflict().Code("archive_failed")   // code → "orders.repo.archive_failed"
+repoerrNotFound.New()                       // class → not_found, code → "orders.repo"
+repoerr.WrapDBError(err, "create")          // auto-class + code → "orders.repo.create"
+repoerr.WrapRedisError(err, "cache")        // auto-class + code → "orders.repo.cache"
 ```
 
 ## Validation
@@ -210,8 +211,8 @@ bang.WrapDBError(err).Code("users.repo.get").Debug("id", id)
 bang.WrapRedisError(err).Code("cache.get").Debug("key", key)
 // redis:nil → NotFound, connection refused → NetworkError
 
-// Через Module
-Mod.WrapDBError(err, "get_by_id").Debug("id", id)
+// Через Prefix factory
+repoerr.WrapDBError(err, "get_by_id").Debug("id", id)
 ```
 
 ## HTTP-ответ (RFC 7807)
@@ -354,7 +355,7 @@ bang/
 ├── adapters.go      — WrapDBError(), WrapRedisError()
 ├── http.go          — ToHTTP(), WriteHTTP(), ProblemDetail
 ├── log.go           — ToLogRecord(), ToJSON(), SlogAttrs(), SlogError()
-├── module.go        — Module, NewModule()
+├── prefix.go        — Prefix factory
 ├── bangval/         — интеграция с go-playground/validator/v10
 │   ├── validator.go     — Validator, Struct(), русские сообщения
 │   └── checker.go       — Checker, NewCheckFn, Fail()
