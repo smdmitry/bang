@@ -18,10 +18,9 @@ type ProblemDetail struct {
 	Detail   string `json:"detail"`
 	Instance string `json:"instance,omitempty"`
 
-	ErrorType string            `json:"errorType"`
-	Details   map[string]any    `json:"details,omitempty"`
-	Errors    []ValidationError `json:"errors,omitempty"`
-	Cause     []ProblemCause    `json:"cause,omitempty"`
+	Details map[string]any    `json:"details,omitempty"`
+	Errors  []ValidationError `json:"errors,omitempty"`
+	Cause   []ProblemCause    `json:"cause,omitempty"`
 
 	DebugInfo *DebugInfo `json:"debug,omitempty"`
 }
@@ -32,7 +31,6 @@ type ProblemCause struct {
 	Type      string            `json:"type"`
 	Title     string            `json:"title"`
 	Detail    string            `json:"detail"`
-	ErrorType string            `json:"errorType"`
 	Details   map[string]any    `json:"details,omitempty"`
 	Errors    []ValidationError `json:"errors,omitempty"`
 	Cause     []ProblemCause    `json:"cause,omitempty"`
@@ -79,14 +77,10 @@ func ToHTTP(err error, opts HTTPResponseOptions) ProblemDetail {
 	}
 
 	pd := ProblemDetail{
-		Type:      getURN(e),
-		Status:    status,
-		Title:     title,
-		Detail:    detail,
-		ErrorType: "business",
-	}
-	if class == ClassValidation {
-		pd.ErrorType = "validation"
+		Type:   getURN(e),
+		Status: status,
+		Title:  title,
+		Detail: detail,
 	}
 	if opts.Instance != "" {
 		pd.Instance = opts.Instance
@@ -107,7 +101,7 @@ func ToHTTP(err error, opts HTTPResponseOptions) ProblemDetail {
 	}
 
 	// Public cause chain (only nested bang errors), max depth 5.
-	pd.Cause = buildBangCauseChain(e, 5)
+	pd.Cause = buildBangCauseChain(e, 5, opts)
 
 	// Debug info (only for development builds or admin users).
 	if opts.ShowDebug {
@@ -122,7 +116,7 @@ func ToHTTP(err error, opts HTTPResponseOptions) ProblemDetail {
 		if frames := e.StackFrames(); len(frames) > 0 {
 			debug.Stack = frames
 		}
-		if cause := firstNonBangCause(e.GetCause(), 10); cause != nil {
+		if cause := firstNonBangCause(e.GetCause(), 1); cause != nil {
 			debug.Cause = cause.Error()
 		}
 		if opts.ShowSource && file != "" && line > 0 {
@@ -138,7 +132,7 @@ func ToHTTP(err error, opts HTTPResponseOptions) ProblemDetail {
 	return pd
 }
 
-func buildBangCauseChain(e *Error, maxDepth int) []ProblemCause {
+func buildBangCauseChain(e *Error, maxDepth int, opts HTTPResponseOptions) []ProblemCause {
 	if e == nil || maxDepth <= 0 {
 		return nil
 	}
@@ -148,13 +142,9 @@ func buildBangCauseChain(e *Error, maxDepth int) []ProblemCause {
 	for cur != nil && len(chain) < maxDepth {
 		if ce, ok := cur.(*Error); ok {
 			cause := ProblemCause{
-				Type:      getURN(ce),
-				Title:     ce.GetTitle(),
-				Detail:    ce.GetMessage(),
-				ErrorType: "business",
-			}
-			if ce.GetClass() == ClassValidation {
-				cause.ErrorType = "validation"
+				Type:   getURN(ce),
+				Title:  ce.GetTitle(),
+				Detail: ce.GetMessage(),
 			}
 			if details := ce.SafeData(); len(details) > 0 {
 				cause.Details = details
@@ -165,6 +155,32 @@ func buildBangCauseChain(e *Error, maxDepth int) []ProblemCause {
 					cause.Errors[i] = ValidationError{Key: vf.Key, Reason: vf.Reason}
 				}
 			}
+
+			if opts.ShowDebug {
+				file := ce.GetFile()
+				line := ce.GetLine()
+				debug := &DebugInfo{File: file + ":" + strconv.Itoa(line)}
+
+				allData := ce.UnsafeData()
+				if len(allData) > 0 {
+					debug.AllData = allData
+				}
+				if frames := ce.StackFrames(); len(frames) > 0 {
+					debug.Stack = frames
+				}
+				if ceCause := firstNonBangCause(ce.GetCause(), 1); ceCause != nil {
+					debug.Cause = ceCause.Error()
+				}
+				if opts.ShowSource && file != "" && line > 0 {
+					ctx := opts.SourceContextLines
+					if ctx <= 0 {
+						ctx = 3
+					}
+					debug.Source = readSourceContext(file, line, ctx)
+				}
+				cause.DebugInfo = debug
+			}
+
 			chain = append(chain, cause)
 		}
 		cur = errors.Unwrap(cur)
@@ -230,5 +246,5 @@ func getURN(err *Error) string {
 		urnType += ":" + code
 	}
 
-	return "urn:error:" + urnType
+	return "urn:" + urnType
 }

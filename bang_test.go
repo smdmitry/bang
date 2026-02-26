@@ -757,9 +757,6 @@ func TestToHTTP(t *testing.T) {
 	if pd.Status != http.StatusInternalServerError {
 		t.Errorf("status = %d", pd.Status)
 	}
-	if pd.ErrorType != "business" {
-		t.Errorf("errorType = %q", pd.ErrorType)
-	}
 	if pd.DebugInfo != nil {
 		t.Error("no debug without ShowDebug")
 	}
@@ -768,8 +765,8 @@ func TestToHTTP(t *testing.T) {
 func TestToHTTPValidation(t *testing.T) {
 	e := bang.Validation().Field("email", "fmt", "bad")
 	pd := bang.ToHTTP(e, bang.HTTPResponseOptions{})
-	if pd.ErrorType != "validation" || len(pd.Errors) != 1 {
-		t.Errorf("errorType=%q errors=%d", pd.ErrorType, len(pd.Errors))
+	if len(pd.Errors) != 1 {
+		t.Errorf("errors=%d", len(pd.Errors))
 	}
 	// Rule should not be in the HTTP response.
 	if pd.Errors[0].Key != "email" {
@@ -822,9 +819,6 @@ func TestToHTTPCauseChain(t *testing.T) {
 	}
 	if pd.Cause[0].Detail != "cause 1" {
 		t.Errorf("detail = %q", pd.Cause[0].Detail)
-	}
-	if pd.Cause[0].ErrorType != "business" {
-		t.Errorf("errorType = %q", pd.Cause[0].ErrorType)
 	}
 
 	raw, err := json.Marshal(pd.Cause[0])

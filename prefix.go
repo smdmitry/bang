@@ -105,7 +105,20 @@ func (f PrefixFactory) FromClass(class Class) *Error {
 }
 
 func (f PrefixFactory) Wrap(err error) *Error {
-	return &Error{cause: err}
+	class := ClassUnexpected
+	if bangErr, ok := err.(*Error); ok {
+		class = bangErr.class
+	}
+	e := newError(class, 3)
+	e.cause = err
+	return e
+}
+
+// From is a backward-compatible alias for Wrap.
+//
+// Deprecated: use Wrap(err) instead.
+func (f PrefixFactory) From(err error) *Error {
+	return f.Wrap(err)
 }
 
 // Shorthand constructors.

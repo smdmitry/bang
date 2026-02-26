@@ -1,0 +1,215 @@
+Хочу модуль bang для генерации и обработки ошибок.
+Основной упор на удобство и гибкость использования библиотеки.
+Хочешь - заведи классы ошибок для своего модуля, хочешь - используй bang напрямую.
+Нужно чтобы вызывающему коду нужно было передавать как можно меньше параметров и писать короткие вызовы.
+В целевой картине использования библиотеки каждое место в коде, где кидается ошибка было уникальным (свой Code) - чтобы потом легче было разобраться по логам и можно было сделать статистику в prometheus по ошибкам (правда может файл и строка в логах упростит жизнь). И инженеры будут стараться добавить debug данные для каждой ошибки. Типизированные ошибки нужны редко, там где нужно будет обработать ошибку что-то сделать с этими данными.
+
+У ошибки есть:
+- Class - небольшой набор классов ошибок. В модуле уже есть классы для большинства использований. Но есть возможность расширить своими.
+- Code - уникальный код ошибки, у каждого класса уже есть дефолтный код, но в основном передаётся снаружи. Формируется вызывающим кодом произвольно, но рекомендуется так: module_name.submodule_name.error_descr (или module_name.error_descr)
+- Title - текстовый заголовок ошибки для пользователя (зависит в основном от Class, может быть кастомным но очень редко, может быть i18n id)
+- Message - основное текстовое описание ошибки понятное для пользователя (зависит от Class или Code или кастомное, может быть i18n id)
+- Data - типизированные данные (generic) с тегами (expose:"true" = safe)
+- Safe - нетипизированные данные, которые будут видны юзеру (expose=true)
+- Debug - данные число для логов (unsafe)
+- Обычно либо передаётся типизированный Data, либо Safe/Debug.
+- Возможность Wrap другой err (нашей или вообще из другой библиотеки; и потом возможность пройти по цепочке)
+- Возможность проверить тип ошибки через errors.Is(err, bang.NotFound()), bandErr.Is(err) и другие стандартные в индустрии механизмы (и отдельно Class или Code)
+- Получить данные (типизированные и нетипизированные), смерженные вместе Safe и Debug или отдельно
+- Возможность прикрепить стек (.WithStack())
+- Прикреплять файл и строку где ошибка возникла
+- Возможность записать в лог ошибку и в логе будут все поля в формате похожем на RFC7807 но уже без фильтрации по safe и unsafe.
+
+Есть особый вид ошибки: Validation.
+В котором есть массив из данных по ошибке валидации поля. Пример:
+```
+[
+    {
+        "key":"passports.0.issueDate",
+		"rule: "passports_date_format", // Это поле unsafe, не видно юзеру
+        "reason": "Исправьте дату выдачи. В качестве разделителя между днем, месяцем и неделей используйте точку. Дату задавайте арабскими цифрами. Пример: 20.01.2020"
+    },
+    {
+        "key":"passports.1.serial",
+		"rule: "passports_serial_format", // Это поле unsafe, не видно юзеру
+        "reason": "Исправьте серию паспорта. Серия паспорта - это четыре арабские цифры"
+    }]
+```
+Притом можно комбинировать несколько Validation ошибок чтобы дополнить массив.
+
+Дополнительные адаптеры:
+- (e *Bang.Error) WrapDBError(err) - для оборачивания ошибок от pgx, sql и других db библиотек
+- (e *Bang.Error) WrapRedisError(err) - для оборачивания ошибок от redis
+- Wrap*Error может переопределить дефолтные параметры ошибки
+
+Адаптер для выдачи в HTTP слое в RFC7807:
+- type формируется из code
+- status - маппинг из Class в HTTP Code (или переопределен Code)
+- title из Title
+- detail из Message
+- details - Safe данные
+- instance - текущий api путь
+- errors - массив валидационных ошибок (без rule). Если не валидация то нет.
+Дальше поля только при условии (development сборка или пользователь - админ):
+- debug - все данные (safe + unsafe) но
+- stack
+- filename + line
+- может быть вообще кусок кода вокруг места ошибки (только для debug сборки)
+
+Набор стандартных классов:
+ClassInternalServer
+ClassValidation
+ClassBadRequest
+ClassNotFound
+ClassUnauthorized
+ClassForbidden
+ClassConflict
+ClassTooManyRequests
+ClassDatabase
+ClassDuplicateKey
+ClassForeignKeyViolation
+ClassExternalService
+ClassNetwork
+ClassTimeout
+ClassSerialization
+ClassUnexpected
+ClassNotImplemented
+ClassLocked
+
+Пакет для фреймворка Gin: banggin.
+Пакет для github.com/go-playground/validator/v10 чтобы преобразовать ошибки валидации в bang Validation и сделать человекочитаемые русские тексты.
+
+Посмотри примерную реализацию всего на https://github.com/smdmitry/bang или в приложенном архиве.
+Можно сильно рефакторить и менять реализацию, в архиве просто пример.
+
+Как планирую использовать библиотеку:
+/*
+1. Использование напрямую
+*/
+var err error
+var bangErr = bang.NotFound().Wrap(err).
+SafeMap(bang.Map{"key": "value"}). // Можно задать видимые данные как map[string]any
+Safe("key", "value"). // Можно задать видимые данные как key-value пары
+DebugMap(bang.Map{"key": "value"}). // Можно задать unsafe данные как map[string]any
+Debug("keyd", "valued"). // Можно задать unsafe данные как key-value пары
+Code("мжно.задать.код"). // Можно задать свой код (как строку, но внутри это тип Code)
+Title("Можно переопределить заголовок"). // Можно переопределить заголовок
+Msg("Можно переопределить сообщение").  // Можно переопределить сообщение
+Msg("Можно переопределить сообщение {{.key}}")  // Но если есть подстановки то могут не сработать если данных нет
+
+/*
+2. Простая регистрация
+*/
+// define.go
+const CodeTaskNotFound = "task.not_found"
+
+func init() {
+// Можно зарегать только сообщение
+bang.MustRegisterMessages(map[string]string{ // Внутри проверит на дублирование и кинет ошибку если есть
+CodeTaskNotFound: "Task '{{.key}}' not found",
+})
+
+// А можно определить любые параметры ошибки
+bang.MustRegisterCodes(map[string]bang.CodeCfg{ // Внутри проверит на дублирование и кинет ошибку если есть
+CodeTaskNotFound: bang.CodeCfg{
+Class: bang.ClassNotFound, // можно свой класс задать (а можно и не задавать, тогда берем какой-то дефолт)
+Title: "Можно свой заголовок",
+Msg: "Task '{{.key}}' not found",
+// HTTPCode: 500, // даже можно код http ошибки переопределить
+},
+})
+}
+
+var TaskNotFound = bang.Factory(CodeTaskNotFound)
+
+// usage.go
+var bangErr = bang.NotFound().Wrap(err).
+Code(module.CodeTaskNotFound).
+Safe("key", "value")
+
+// Эквивалентно:
+var bangErr1 = module.TaskNotFound().Debug(...)
+var bangErr2 = bang.New(module.CodeTaskNotFound).Debug(...)
+
+/*
+3. Создание типа
+*/
+// define.go
+const CodeTaskNotFound = "task.not_found"
+
+// Аналогично bang.MustRegisterCodes но в виде вызова функций:
+var TaskNotFound = bang.Register(CodeTaskNotFound).
+From(bang.NotFound()). // или из существующей ошибки
+Class(bang.ClassNotFound). // или задать класс вручную
+Message("Task '{{.key}}' not found"). // равно bang.RegisterMessages
+Title("Можно задать и свой заголовок").
+New()
+
+// usage.go
+var bangErr = module.TaskNotFound().Debug(...)
+
+/*
+4. Типизированная ошибка
+*/
+// define.go
+const CodeTaskNotFound = "task.not_found"
+
+type TaskNotFoundData struct {
+TaskID string `json:"task_id" expose:"true"`
+Owner  string `json:"owner,omitempty"`
+}
+
+var TaskNotFound = bang.Register(CodeTaskNotFound).
+From(bang.NotFound()).
+Message("Task '{{.key}}' not found").
+Typed[TaskNotFoundData]() // или Typed[TaskNotFoundData].New()
+
+// usage.go
+var bangErr = module.TaskNotFound(TaskNotFoundData{...}) // Данные передать обязательно
+
+// Дополнительные настройки библиотеки:
+- Настройка: фейлить если ключ подстановки не найден в данных/или оставить подстановку в строке как есть:
+bang.SetTemplateMissingKeyMode(bang.MissingKeyKeep) // MissingKeyError MissingKeyRemove
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+1. Использовать напрямую smerr (без создания своих типов):
+smerr.CommandFailed().Wrap(err).Code(SomeCustomCodeFromMyModule).Debug(map[string]any{
+"field": "cursor",
+})
+
+2. Создать свои ошибки с типизированным Data
+var ProjectCommandFailedDetails = smerr.Descriptor[ProjectCommandFailedData]{
+Class: smerr.ClassStorageFailed,
+Code:  ProjectCommandFailedCode,
+Title: "Cache project operation failed",
+}
+
+3. Создать свои ошибки без типизированного Data
+var ProjectCommandFailedDetails = smerr.Descriptor{
+Class: smerr.ClassStorageFailed,
+Code: ProjectCommandFailedCode,
+}
+
+4. Задать все данные в момент ошибки (кроме class)
+var ProjectCommandFailed = smerr.CommandFailed().Code(ProjectCommandFailedCode)...

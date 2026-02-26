@@ -43,28 +43,28 @@ type classMeta struct {
 }
 
 var classRegistry = map[Class]classMeta{
-	ClassInternalServer:  {"internal_server", "Internal Server Error", "An internal error occurred. Please try again later.", http.StatusInternalServerError},
-	ClassValidation:      {"validation", "Validation Error", "The request contains invalid data.", http.StatusUnprocessableEntity},
-	ClassBadRequest:      {"bad_request", "Bad Request", "The request is invalid.", http.StatusBadRequest},
-	ClassNotFound:        {"not_found", "Not Found", "The requested resource was not found.", http.StatusNotFound},
-	ClassUnauthorized:    {"unauthorized", "Unauthorized", "Authentication is required.", http.StatusUnauthorized},
-	ClassForbidden:       {"forbidden", "Forbidden", "You do not have permission to perform this action.", http.StatusForbidden},
-	ClassConflict:        {"conflict", "Conflict", "The request conflicts with the current state.", http.StatusConflict},
-	ClassTooManyRequests: {"too_many_requests", "Too Many Requests", "Rate limit exceeded. Please try again later.", http.StatusTooManyRequests},
+	ClassInternalServer:  {"internal_server", "Ошибка сервера", "На сервере произошла ошибка. Пожалуйста, попробуйте позже.", http.StatusInternalServerError},
+	ClassValidation:      {"validation", "Ошибка проверки данных", "В запросе указаны некорректные данные.", http.StatusUnprocessableEntity},
+	ClassBadRequest:      {"bad_request", "Некорректный запрос", "Запрос составлен неверно.", http.StatusBadRequest},
+	ClassNotFound:        {"not_found", "Не найдено", "Запрашиваемый ресурс не найден.", http.StatusNotFound},
+	ClassUnauthorized:    {"unauthorized", "Требуется авторизация", "Для выполнения операции необходимо войти в систему.", http.StatusUnauthorized},
+	ClassForbidden:       {"forbidden", "Доступ запрещён", "У вас нет прав для выполнения этой операции.", http.StatusForbidden},
+	ClassConflict:        {"conflict", "Конфликт данных", "Операция не может быть выполнена из-за текущего состояния данных.", http.StatusConflict},
+	ClassTooManyRequests: {"too_many_requests", "Слишком много запросов", "Превышено допустимое количество запросов. Попробуйте позже.", http.StatusTooManyRequests},
 
-	ClassDatabase:            {"database", "Database Error", "A database error occurred.", http.StatusInternalServerError},
-	ClassDuplicateKey:        {"duplicate_key", "Duplicate Entry", "A record with the same key already exists.", http.StatusConflict},
-	ClassForeignKeyViolation: {"foreign_key_violation", "Reference Error", "The referenced resource does not exist.", http.StatusUnprocessableEntity},
+	ClassDatabase:            {"database", "Ошибка базы данных", "Произошла ошибка при работе с базой данных.", http.StatusInternalServerError},
+	ClassDuplicateKey:        {"duplicate_key", "Данные уже существуют", "Запись с такими данными уже существует.", http.StatusConflict},
+	ClassForeignKeyViolation: {"foreign_key_violation", "Связанная запись не найдена", "Указанная связанная запись не существует.", http.StatusUnprocessableEntity},
 
-	ClassExternalService: {"external_service", "External Service Error", "An external service returned an error.", http.StatusBadGateway},
-	ClassNetwork:         {"network", "Network Error", "A network error occurred.", http.StatusBadGateway},
-	ClassTimeout:         {"timeout", "Timeout", "The operation timed out.", http.StatusGatewayTimeout},
+	ClassExternalService: {"external_service", "Ошибка внешнего сервиса", "Внешний сервис временно недоступен или вернул ошибку.", http.StatusBadGateway},
+	ClassNetwork:         {"network", "Ошибка сети", "Произошла сетевая ошибка. Попробуйте позже.", http.StatusBadGateway},
+	ClassTimeout:         {"timeout", "Превышено время ожидания", "Время ожидания операции истекло. Попробуйте позже.", http.StatusGatewayTimeout},
 
-	ClassSerialization: {"serialization", "Serialization Error", "Failed to serialize or deserialize data.", http.StatusInternalServerError},
-	ClassUnexpected:    {"unexpected", "Unexpected Error", "An unexpected error occurred.", http.StatusInternalServerError},
+	ClassSerialization: {"serialization", "Ошибка обработки данных", "Не удалось обработать данные.", http.StatusInternalServerError},
+	ClassUnexpected:    {"unexpected", "Непредвиденная ошибка", "Произошла непредвиденная ошибка. Попробуйте позже.", http.StatusInternalServerError},
 
-	ClassNotImplemented: {"not_implemented", "Not Implemented", "Not Implemented.", http.StatusNotImplemented},
-	ClassLocked:         {"locked", "Locked", "Locked.", http.StatusLocked},
+	ClassNotImplemented: {"not_implemented", "Функция недоступна", "Данная функция пока не поддерживается.", http.StatusNotImplemented},
+	ClassLocked:         {"locked", "Ресурс заблокирован", "Запрашиваемый ресурс временно заблокирован.", http.StatusLocked},
 }
 
 // ClassDef describes a custom error class for registration.

@@ -232,7 +232,6 @@ bang.WriteHTTP(w, err, bang.HTTPResponseOptions{
     "title": "Not Found",
     "detail": "Пользователь не найден",
     "instance": "/api/users/123",
-    "errorType": "business",
     "details": {"user_id": "123"},
     "debug": {
         "data": {"user_id": "123", "query": "SELECT ..."},
@@ -248,7 +247,6 @@ bang.WriteHTTP(w, err, bang.HTTPResponseOptions{
 {
     "type": "urn:error:validation:users.register",
     "status": 422,
-    "errorType": "validation",
     "errors": [
         {"key": "email", "reason": "Введите корректный email"},
         {"key": "password", "reason": "Пароль — не менее 8 символов"}

@@ -52,6 +52,13 @@ func WrapValidationErr(err error) *bang.Error {
 	return bindPayloadErr(err)
 }
 
+// WrapValidationError is a backward-compatible alias for WrapValidationErr.
+//
+// Deprecated: use WrapValidationErr(err) instead.
+func WrapValidationError(err error) *bang.Error {
+	return WrapValidationErr(err)
+}
+
 func collectValidationErrors(err error) []validator.FieldError {
 	if err == nil {
 		return nil

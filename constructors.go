@@ -71,7 +71,20 @@ func New(code string) *Error {
 }
 
 func Wrap(err error) *Error {
-	return &Error{cause: err}
+	class := ClassUnexpected
+	if bangErr, ok := err.(*Error); ok {
+		class = bangErr.class
+	}
+	e := newError(class, 1)
+	e.cause = err
+	return e
+}
+
+// From is a backward-compatible alias for Wrap.
+//
+// Deprecated: use Wrap(err) instead.
+func From(err error) *Error {
+	return Wrap(err)
 }
 
 // FromClass creates an error with an arbitrary class.
