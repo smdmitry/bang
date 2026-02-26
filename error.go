@@ -56,12 +56,8 @@ const causeFallbackMaxDepth = 5
 
 // newError creates a new Error, auto-capturing file and line of the caller.
 func newError(class Class, callerSkip int) *Error {
-	meta := getClassMeta(class)
 	e := &Error{
-		class:   class,
-		code:    meta.DefaultCode,
-		title:   meta.Title,
-		message: meta.Message,
+		class: class,
 	}
 	if _, file, line, ok := runtime.Caller(callerSkip + 1); ok {
 		if projectRoot != "" {

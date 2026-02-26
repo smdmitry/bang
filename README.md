@@ -227,7 +227,7 @@ bang.WriteHTTP(w, err, bang.HTTPResponseOptions{
 Формат ответа:
 ```json
 {
-    "type": "urn:error:not_found:users.get_by_id",
+    "type": "urn:not_found:users.get_by_id",
     "status": 404,
     "title": "Not Found",
     "detail": "Пользователь не найден",
@@ -245,7 +245,7 @@ bang.WriteHTTP(w, err, bang.HTTPResponseOptions{
 Для validation:
 ```json
 {
-    "type": "urn:error:validation:users.register",
+    "type": "urn:validation:users.register",
     "status": 422,
     "errors": [
         {"key": "email", "reason": "Введите корректный email"},

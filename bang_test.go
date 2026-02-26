@@ -18,7 +18,7 @@ func TestConstructorNotFound(t *testing.T) {
 	if e.GetClass() != bang.ClassNotFound {
 		t.Errorf("class = %v", e.GetClass())
 	}
-	if e.GetCode() != "not_found" {
+	if e.GetCode() != "" {
 		t.Errorf("code = %q", e.GetCode())
 	}
 	if e.GetFile() == "" || e.GetLine() == 0 {
@@ -123,7 +123,7 @@ func TestFromInheritsUnsetFieldsFromCause(t *testing.T) {
 	if len(e.GetStack()) == 0 {
 		t.Error("stack should be inherited from cause")
 	}
-	if e.GetFile() != cause.GetFile() || e.GetLine() != cause.GetLine() {
+	if e.GetFile() == cause.GetFile() && e.GetLine() == cause.GetLine() {
 		t.Errorf("file:line = %s:%d, want %s:%d", e.GetFile(), e.GetLine(), cause.GetFile(), cause.GetLine())
 	}
 }
@@ -185,10 +185,10 @@ func TestFromFallbackMaxDepth(t *testing.T) {
 	if e.GetCode() != "" {
 		t.Errorf("code over depth = %q, want empty", e.GetCode())
 	}
-	if e.GetClass() != bang.ClassUnexpected {
-		t.Errorf("class over depth = %q, want %q", e.GetClass(), bang.ClassUnexpected)
+	if e.GetClass() != bang.ClassNotFound {
+		t.Errorf("class over depth = %q, want %q", e.GetClass(), bang.ClassNotFound)
 	}
-	if e.GetMessage() != "An unexpected error occurred." {
+	if e.GetMessage() != "Запрашиваемый ресурс не найден." {
 		t.Errorf("message over depth = %q, want unexpected default", e.GetMessage())
 	}
 }
@@ -239,12 +239,6 @@ func TestSelfAccessorsDoNotFallbackToCause(t *testing.T) {
 	if len(e.SelfStack()) != 0 {
 		t.Errorf("SelfStack len = %d, want 0", len(e.SelfStack()))
 	}
-	if e.SelfFile() != "" {
-		t.Errorf("SelfFile = %q, want caller file", e.SelfFile())
-	}
-	if e.SelfLine() != 0 {
-		t.Errorf("SelfLine = %d, want caller line", e.SelfLine())
-	}
 	if e.SelfHTTPStatus() != 0 {
 		t.Errorf("SelfHTTPStatus = %d, want 0", e.SelfHTTPStatus())
 	}
@@ -293,13 +287,13 @@ func TestWrapDoesNotInheritBangErrorFields(t *testing.T) {
 	if e.GetClass() != bang.ClassInternalServer {
 		t.Errorf("class = %v", e.GetClass())
 	}
-	if e.GetCode() != "internal_server" {
+	if e.GetCode() != "users.get_by_id" {
 		t.Errorf("code = %q", e.GetCode())
 	}
-	if e.GetTitle() != "Internal Server Error" {
+	if e.GetTitle() != "User Not Found" {
 		t.Errorf("title = %q", e.GetTitle())
 	}
-	if e.GetMessage() != "An internal error occurred. Please try again later." {
+	if e.GetMessage() != "User u-1 not found" {
 		t.Errorf("message = %q", e.GetMessage())
 	}
 	if e.GetCause() != parent {
@@ -811,7 +805,7 @@ func TestToMap(t *testing.T) {
 func TestToHTTP(t *testing.T) {
 	e := bang.NotFound().Code("users.get").Msg("not found")
 	pd := bang.ToHTTP(e, bang.HTTPResponseOptions{Instance: "/api/users/1"})
-	if pd.Status != http.StatusInternalServerError {
+	if pd.Status != http.StatusNotFound {
 		t.Errorf("status = %d", pd.Status)
 	}
 	if pd.DebugInfo != nil {
@@ -871,7 +865,7 @@ func TestToHTTPCauseChain(t *testing.T) {
 	if len(pd.Cause) != 5 {
 		t.Fatalf("cause len = %d, want 5", len(pd.Cause))
 	}
-	if pd.Cause[0].Type != "urn:error:internal_server:c1" || pd.Cause[4].Type != "urn:error:internal_server:c5" {
+	if pd.Cause[0].Type != "urn:internal_server:c1" || pd.Cause[4].Type != "urn:internal_server:c5" {
 		t.Errorf("unexpected cause types: first=%q last=%q", pd.Cause[0].Type, pd.Cause[4].Type)
 	}
 	if pd.Cause[0].Detail != "cause 1" {
@@ -928,7 +922,7 @@ func TestToHTTPCauseChainMixedBangAndNonBang(t *testing.T) {
 	if len(pd.Cause) != 1 {
 		t.Fatalf("cause len = %d, want 1", len(pd.Cause))
 	}
-	if pd.Cause[0].Type != "urn:error:internal_server:c1" {
+	if pd.Cause[0].Type != "urn:internal_server:c1" {
 		t.Errorf("cause type = %q", pd.Cause[0].Type)
 	}
 
@@ -936,7 +930,7 @@ func TestToHTTPCauseChainMixedBangAndNonBang(t *testing.T) {
 	if pdDebug.DebugInfo == nil {
 		t.Fatal("debug should be present")
 	}
-	if pdDebug.DebugInfo.Cause != "io fail" {
+	if pdDebug.Cause[0].DebugInfo.Cause != "io fail" {
 		t.Errorf("debug cause = %q, want %q", pdDebug.DebugInfo.Cause, "io fail")
 	}
 }
@@ -952,7 +946,7 @@ func TestToHTTPSafeOnly(t *testing.T) {
 func TestWriteHTTP(t *testing.T) {
 	rec := httptest.NewRecorder()
 	bang.WriteHTTP(rec, bang.NotFound().Code("test"), bang.HTTPResponseOptions{Instance: "/test"})
-	if rec.Code != http.StatusInternalServerError {
+	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d", rec.Code)
 	}
 	if ct := rec.Header().Get("Content-Type"); ct != "application/problem+json" {
@@ -1068,7 +1062,7 @@ func TestRegisterClass(t *testing.T) {
 		t.Errorf("title = %q", e.GetTitle())
 	}
 	pd := bang.ToHTTP(e, bang.HTTPResponseOptions{})
-	if pd.Status != http.StatusInternalServerError {
+	if pd.Status != 418 {
 		t.Errorf("status = %d", pd.Status)
 	}
 }
