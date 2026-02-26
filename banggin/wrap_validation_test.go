@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin/binding"
 	"github.com/smdmitry/bang"
+	"github.com/smdmitry/bang/bangval"
 )
 
 type payload struct {
@@ -18,7 +19,7 @@ func TestWrapValidationErrorFromGinSliceValidationError(t *testing.T) {
 		t.Fatal("expected validation error")
 	}
 
-	wrapped := bang.WrapValidationError(err)
+	wrapped := bangval.WrapValidationError(err)
 	if wrapped == nil {
 		t.Fatal("expected wrapped error")
 	}
@@ -49,7 +50,7 @@ func TestWrapValidationErrorFromWrappedGinSliceValidationError(t *testing.T) {
 		t.Fatal("expected validation error")
 	}
 
-	wrapped := bang.WrapValidationError(fmt.Errorf("outer: %w", err))
+	wrapped := bangval.WrapValidationError(fmt.Errorf("outer: %w", err))
 	if wrapped == nil {
 		t.Fatal("expected wrapped error")
 	}

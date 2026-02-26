@@ -32,40 +32,44 @@ func ToLogRecord(err error) LogRecord {
 	if !errors.As(err, &e) {
 		e = WrapUnknown(err)
 	}
+	class := e.GetClass()
+	code := e.GetCode()
+	file := e.GetFile()
+	line := e.GetLine()
 	rec := LogRecord{
-		Type:    string(e.class) + ":" + e.code,
-		Class:   string(e.class),
-		Code:    e.code,
-		Title:   e.title,
-		Message: e.message,
-		File:    e.file,
-		Line:    e.line,
+		Type:    string(class) + ":" + code,
+		Class:   string(class),
+		Code:    code,
+		Title:   e.GetTitle(),
+		Message: e.GetMessage(),
+		File:    file,
+		Line:    line,
 	}
 
 	// Merge all data sources for the log.
 	allSafe := make(map[string]any)
-	if e.data != nil {
-		for k, v := range ToMap(e.data) {
+	if data := e.GetData(); data != nil {
+		for k, v := range ToMap(data) {
 			allSafe[k] = v
 		}
 	}
-	for k, v := range e.safe {
+	for k, v := range e.GetSafe() {
 		allSafe[k] = v
 	}
 	if len(allSafe) > 0 {
 		rec.Data = allSafe
 	}
-	if len(e.debug) > 0 {
-		rec.Debug = e.debug
+	if debug := e.GetDebug(); len(debug) > 0 {
+		rec.Debug = debug
 	}
-	if e.cause != nil {
-		rec.Cause = e.cause.Error()
+	if cause := e.GetCause(); cause != nil {
+		rec.Cause = cause.Error()
 	}
 	if frames := e.StackFrames(); len(frames) > 0 {
 		rec.Stack = frames
 	}
-	if len(e.validationFields) > 0 {
-		rec.ValidationErrors = e.validationFields
+	if validationFields := e.GetValidationFields(); len(validationFields) > 0 {
+		rec.ValidationErrors = validationFields
 	}
 	return rec
 }
@@ -84,29 +88,33 @@ func SlogAttrs(err error) []any {
 	if !errors.As(err, &e) {
 		return []any{slog.String("error", err.Error())}
 	}
+	class := e.GetClass()
+	code := e.GetCode()
+	file := e.GetFile()
+	line := e.GetLine()
 	attrs := []any{
-		slog.String("error.type", string(e.class)+":"+e.code),
-		slog.String("error.class", string(e.class)),
-		slog.String("error.code", e.code),
-		slog.String("error.message", e.message),
+		slog.String("error.type", string(class)+":"+code),
+		slog.String("error.class", string(class)),
+		slog.String("error.code", code),
+		slog.String("error.message", e.GetMessage()),
 	}
-	if e.file != "" {
-		attrs = append(attrs, slog.String("error.file", e.file), slog.Int("error.line", e.line))
+	if file != "" {
+		attrs = append(attrs, slog.String("error.file", file), slog.Int("error.line", line))
 	}
-	if e.data != nil {
-		attrs = append(attrs, slog.Any("error.data", ToMap(e.data)))
+	if data := e.GetData(); data != nil {
+		attrs = append(attrs, slog.Any("error.data", ToMap(data)))
 	}
-	if len(e.safe) > 0 {
-		attrs = append(attrs, slog.Any("error.safe", e.safe))
+	if safe := e.GetSafe(); len(safe) > 0 {
+		attrs = append(attrs, slog.Any("error.safe", safe))
 	}
-	if len(e.debug) > 0 {
-		attrs = append(attrs, slog.Any("error.debug", e.debug))
+	if debug := e.GetDebug(); len(debug) > 0 {
+		attrs = append(attrs, slog.Any("error.debug", debug))
 	}
-	if e.cause != nil {
-		attrs = append(attrs, slog.String("error.cause", e.cause.Error()))
+	if cause := e.GetCause(); cause != nil {
+		attrs = append(attrs, slog.String("error.cause", cause.Error()))
 	}
-	if len(e.validationFields) > 0 {
-		attrs = append(attrs, slog.Any("error.validationErrors", e.validationFields))
+	if validationFields := e.GetValidationFields(); len(validationFields) > 0 {
+		attrs = append(attrs, slog.Any("error.validationErrors", validationFields))
 	}
 	return attrs
 }

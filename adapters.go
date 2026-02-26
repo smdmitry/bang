@@ -61,8 +61,3 @@ func classifyRedisError(err error) Class {
 		return ClassDatabase
 	}
 }
-
-// TODO: Правильная реализация для поддержки WrapValidationError(nil) == nil
-func WrapValidationError(err error) *Error {
-	return bindErr(err)
-}

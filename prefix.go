@@ -104,15 +104,8 @@ func (f PrefixFactory) FromClass(class Class) *Error {
 	return f.newFromClass(class)
 }
 
-func (f PrefixFactory) From(err error) *Error {
-	e := f.Unexpected()
-	if err != nil {
-		if parent, ok := AsBang(err); ok && parent != nil && parent != e {
-			e.inheritParent(parent)
-		}
-		e.cause = err
-	}
-	return e
+func (f PrefixFactory) Wrap(err error) *Error {
+	return &Error{cause: err}
 }
 
 // Shorthand constructors.

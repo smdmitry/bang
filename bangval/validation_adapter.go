@@ -1,4 +1,4 @@
-package bang
+package bangval
 
 import (
 	"encoding/json"
@@ -9,7 +9,9 @@ import (
 	"strings"
 	"unicode"
 
+	ut "github.com/go-playground/universal-translator"
 	"github.com/go-playground/validator/v10"
+	"github.com/smdmitry/bang"
 )
 
 const (
@@ -19,22 +21,30 @@ const (
 
 type SliceValidationError []error
 
-func bindErr(err error) *Error {
+// TODO: костыль с Translator, придумать что-то другое
+var Translator ut.Translator
+
+func WrapValidationErr(err error) *bang.Error {
 	if err == nil {
 		return nil
 	}
-	if bangErr, ok := AsBang(err); ok {
+	if bangErr, ok := bang.AsBang(err); ok {
 		return bangErr
 	}
 
 	fields := collectValidationErrors(err)
 	if len(fields) > 0 {
-		e := Validation().Code(bindValidationCode).
+		e := bang.Validation().Code(bindValidationCode).
 			Msg("Некорректные параметры запроса").
 			Wrap(err)
 
 		for _, fe := range fields {
-			e.Field(validationFieldKey(fe), fe.Tag(), validationReason(fe))
+			if Translator != nil {
+				e.Field(validationFieldKey(fe), fe.Tag(), fe.Translate(Translator))
+			} else {
+				e.Field(validationFieldKey(fe), fe.Tag(), validationReason(fe))
+			}
+
 		}
 		return e
 	}
@@ -155,8 +165,8 @@ func validationReason(fe validator.FieldError) string {
 	}
 }
 
-func bindPayloadErr(err error) *Error {
-	e := Validation().Code(bindJSONCode).
+func bindPayloadErr(err error) *bang.Error {
+	e := bang.Validation().Code(bindJSONCode).
 		Msg("Некорректное тело запроса").
 		Wrap(err)
 

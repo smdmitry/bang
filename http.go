@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -20,18 +21,22 @@ type ProblemDetail struct {
 	ErrorType string            `json:"errorType"`
 	Details   map[string]any    `json:"details,omitempty"`
 	Errors    []ValidationError `json:"errors,omitempty"`
-	Cause     []CauseItem       `json:"cause,omitempty"`
+	Cause     []ProblemCause    `json:"cause,omitempty"`
 
 	DebugInfo *DebugInfo `json:"debug,omitempty"`
 }
 
-// CauseItem is a public cause-chain element for nested bang errors.
-type CauseItem struct {
-	Type   string `json:"type"`
-	Class  string `json:"class"`
-	Code   string `json:"code"`
-	Title  string `json:"title"`
-	Detail string `json:"detail"`
+// ProblemCause is a public cause-chain element with the same shape as
+// ProblemDetail, except it has no status/instance fields.
+type ProblemCause struct {
+	Type      string            `json:"type"`
+	Title     string            `json:"title"`
+	Detail    string            `json:"detail"`
+	ErrorType string            `json:"errorType"`
+	Details   map[string]any    `json:"details,omitempty"`
+	Errors    []ValidationError `json:"errors,omitempty"`
+	Cause     []ProblemCause    `json:"cause,omitempty"`
+	DebugInfo *DebugInfo        `json:"debug,omitempty"`
 }
 
 // ValidationError is the user-facing validation field error (rule omitted).
@@ -45,7 +50,6 @@ type DebugInfo struct {
 	AllData map[string]any `json:"data,omitempty"`
 	Stack   []Frame        `json:"stack,omitempty"`
 	File    string         `json:"file,omitempty"`
-	Line    int            `json:"line,omitempty"`
 	Source  string         `json:"source,omitempty"`
 	Cause   string         `json:"cause,omitempty"`
 }
@@ -65,25 +69,27 @@ func ToHTTP(err error, opts HTTPResponseOptions) ProblemDetail {
 		e = WrapUnknown(err)
 	}
 
-	status := e.class.HTTPStatus()
-	if e.httpStatus != 0 {
-		status = e.httpStatus
+	class := e.GetClass()
+	title := e.GetTitle()
+	detail := e.GetMessage()
+
+	status := class.HTTPStatus()
+	if httpStatus := e.GetHTTPStatus(); httpStatus != 0 {
+		status = httpStatus
 	}
 
 	pd := ProblemDetail{
-		Type:   fmt.Sprintf("urn:error:%s:%s", e.class, e.code),
-		Status: status,
-		Title:  e.title,
-		Detail: e.message,
+		Type:      getURN(e),
+		Status:    status,
+		Title:     title,
+		Detail:    detail,
+		ErrorType: "business",
+	}
+	if class == ClassValidation {
+		pd.ErrorType = "validation"
 	}
 	if opts.Instance != "" {
 		pd.Instance = opts.Instance
-	}
-
-	if e.class == ClassValidation {
-		pd.ErrorType = "validation"
-	} else {
-		pd.ErrorType = "business"
 	}
 
 	// Safe data: expose:"true" fields from typed Data + Safe map.
@@ -93,9 +99,9 @@ func ToHTTP(err error, opts HTTPResponseOptions) ProblemDetail {
 	}
 
 	// Validation errors (without rule — rule is unsafe).
-	if len(e.validationFields) > 0 {
-		pd.Errors = make([]ValidationError, len(e.validationFields))
-		for i, vf := range e.validationFields {
+	if validationFields := e.GetValidationFields(); len(validationFields) > 0 {
+		pd.Errors = make([]ValidationError, len(validationFields))
+		for i, vf := range validationFields {
 			pd.Errors[i] = ValidationError{Key: vf.Key, Reason: vf.Reason}
 		}
 	}
@@ -105,24 +111,26 @@ func ToHTTP(err error, opts HTTPResponseOptions) ProblemDetail {
 
 	// Debug info (only for development builds or admin users).
 	if opts.ShowDebug {
-		debug := &DebugInfo{File: e.file, Line: e.line}
+		file := e.GetFile()
+		line := e.GetLine()
+		debug := &DebugInfo{File: file + ":" + strconv.Itoa(line)}
 
-		allData := e.AllData()
+		allData := e.UnsafeData()
 		if len(allData) > 0 {
 			debug.AllData = allData
 		}
 		if frames := e.StackFrames(); len(frames) > 0 {
 			debug.Stack = frames
 		}
-		if e.cause != nil {
-			debug.Cause = e.cause.Error()
+		if cause := firstNonBangCause(e.GetCause(), 10); cause != nil {
+			debug.Cause = cause.Error()
 		}
-		if opts.ShowSource && e.file != "" && e.line > 0 {
+		if opts.ShowSource && file != "" && line > 0 {
 			ctx := opts.SourceContextLines
 			if ctx <= 0 {
 				ctx = 3
 			}
-			debug.Source = readSourceContext(e.file, e.line, ctx)
+			debug.Source = readSourceContext(file, line, ctx)
 		}
 		pd.DebugInfo = debug
 	}
@@ -130,22 +138,34 @@ func ToHTTP(err error, opts HTTPResponseOptions) ProblemDetail {
 	return pd
 }
 
-func buildBangCauseChain(e *Error, maxDepth int) []CauseItem {
+func buildBangCauseChain(e *Error, maxDepth int) []ProblemCause {
 	if e == nil || maxDepth <= 0 {
 		return nil
 	}
 
-	var chain []CauseItem
-	cur := e.cause
+	var chain []ProblemCause
+	cur := e.GetCause()
 	for cur != nil && len(chain) < maxDepth {
 		if ce, ok := cur.(*Error); ok {
-			chain = append(chain, CauseItem{
-				Type:   fmt.Sprintf("urn:error:%s:%s", ce.class, ce.code),
-				Class:  string(ce.class),
-				Code:   ce.code,
-				Title:  ce.title,
-				Detail: ce.message,
-			})
+			cause := ProblemCause{
+				Type:      getURN(ce),
+				Title:     ce.GetTitle(),
+				Detail:    ce.GetMessage(),
+				ErrorType: "business",
+			}
+			if ce.GetClass() == ClassValidation {
+				cause.ErrorType = "validation"
+			}
+			if details := ce.SafeData(); len(details) > 0 {
+				cause.Details = details
+			}
+			if validationFields := ce.GetValidationFields(); len(validationFields) > 0 {
+				cause.Errors = make([]ValidationError, len(validationFields))
+				for i, vf := range validationFields {
+					cause.Errors[i] = ValidationError{Key: vf.Key, Reason: vf.Reason}
+				}
+			}
+			chain = append(chain, cause)
 		}
 		cur = errors.Unwrap(cur)
 	}
@@ -153,6 +173,20 @@ func buildBangCauseChain(e *Error, maxDepth int) []CauseItem {
 		return nil
 	}
 	return chain
+}
+
+func firstNonBangCause(err error, maxDepth int) error {
+	if err == nil || maxDepth <= 0 {
+		return nil
+	}
+	cur := err
+	for depth := 0; cur != nil && depth < maxDepth; depth++ {
+		if _, ok := cur.(*Error); !ok {
+			return cur
+		}
+		cur = errors.Unwrap(cur)
+	}
+	return nil
 }
 
 // WriteHTTP writes the ProblemDetail as a JSON HTTP response.
@@ -186,4 +220,15 @@ func readSourceContext(file string, line, contextLines int) string {
 		fmt.Fprintf(&b, "%s%4d | %s\n", marker, i+1, lines[i])
 	}
 	return b.String()
+}
+
+func getURN(err *Error) string {
+	urnType := string(err.GetClass())
+	code := err.GetCode()
+
+	if len(code) > 0 {
+		urnType += ":" + code
+	}
+
+	return "urn:error:" + urnType
 }

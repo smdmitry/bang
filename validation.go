@@ -41,22 +41,23 @@ func CombineValidation(errs ...error) *Error {
 			continue
 		}
 		var e *Error
-		if !errors.As(err, &e) || e.class != ClassValidation {
+		if !errors.As(err, &e) || e.GetClass() != ClassValidation {
 			continue
 		}
+		validationFields := e.GetValidationFields()
 		if result == nil {
 			result = &Error{
-				class:            e.class,
-				code:             e.code,
-				title:            e.title,
-				message:          e.message,
-				file:             e.file,
-				line:             e.line,
-				validationFields: make([]ValidationField, len(e.validationFields)),
+				class:            e.GetClass(),
+				code:             e.GetCode(),
+				title:            e.GetTitle(),
+				message:          e.GetMessage(),
+				file:             e.GetFile(),
+				line:             e.GetLine(),
+				validationFields: make([]ValidationField, len(validationFields)),
 			}
-			copy(result.validationFields, e.validationFields)
+			copy(result.validationFields, validationFields)
 		} else {
-			result.validationFields = append(result.validationFields, e.validationFields...)
+			result.validationFields = append(result.validationFields, validationFields...)
 		}
 	}
 	return result
@@ -69,7 +70,7 @@ func IsValidation(err error) bool { return HasClass(err, ClassValidation) }
 func ValidationFields(err error) []ValidationField {
 	var e *Error
 	if errors.As(err, &e) {
-		return e.validationFields
+		return e.GetValidationFields()
 	}
 	return nil
 }

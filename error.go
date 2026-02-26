@@ -3,9 +3,30 @@ package bang
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
+
+var projectRoot string
+
+func init() {
+	dir, _ := os.Getwd()
+
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			projectRoot = dir
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+}
 
 // Error is the core error type. It implements the error interface and supports
 // a fluent builder pattern for easy construction.
@@ -31,6 +52,8 @@ type Error struct {
 	httpStatus int    // optional HTTP status override
 }
 
+const causeFallbackMaxDepth = 5
+
 // newError creates a new Error, auto-capturing file and line of the caller.
 func newError(class Class, callerSkip int) *Error {
 	meta := getClassMeta(class)
@@ -41,6 +64,12 @@ func newError(class Class, callerSkip int) *Error {
 		message: meta.Message,
 	}
 	if _, file, line, ok := runtime.Caller(callerSkip + 1); ok {
+		if projectRoot != "" {
+			if rel, err := filepath.Rel(projectRoot, file); err == nil {
+				file = rel
+			}
+		}
+
 		e.file = file
 		e.line = line
 	}
@@ -51,44 +80,8 @@ func newError(class Class, callerSkip int) *Error {
 
 // Wrap wraps another error as the cause.
 func (e *Error) Wrap(err error) *Error {
-	if err != nil {
-		e.cause = err
-	}
+	e.cause = err
 	return e
-}
-
-func (e *Error) inheritParent(parent *Error) {
-	e.class = parent.class
-	e.codePrefix = parent.codePrefix
-	e.code = parent.code
-	e.title = parent.title
-	e.message = parent.message
-	e.msgTpl = parent.msgTpl
-	e.data = parent.data
-	e.httpStatus = parent.httpStatus
-
-	if len(parent.safe) > 0 {
-		e.safe = make(map[string]any, len(parent.safe))
-		for k, v := range parent.safe {
-			e.safe[k] = v
-		}
-	} else {
-		e.safe = nil
-	}
-	if len(parent.debug) > 0 {
-		e.debug = make(map[string]any, len(parent.debug))
-		for k, v := range parent.debug {
-			e.debug[k] = v
-		}
-	} else {
-		e.debug = nil
-	}
-	if len(parent.validationFields) > 0 {
-		e.validationFields = make([]ValidationField, len(parent.validationFields))
-		copy(e.validationFields, parent.validationFields)
-	} else {
-		e.validationFields = nil
-	}
 }
 
 // Code sets a unique error code. Recommended format: module.submodule.error_descr
@@ -236,18 +229,18 @@ func (e *Error) resolveTemplateIfReady() {
 
 func (e *Error) allTemplateValues() map[string]any {
 	values := make(map[string]any)
-	if e.data != nil {
-		for k, v := range ToMap(e.data) {
+	if data := e.GetData(); data != nil {
+		for k, v := range ToMap(data) {
 			values[k] = v
 		}
 	}
-	if e.safe != nil {
-		for k, v := range e.safe {
+	if safe := e.GetSafe(); safe != nil {
+		for k, v := range safe {
 			values[k] = v
 		}
 	}
-	if e.debug != nil {
-		for k, v := range e.debug {
+	if debug := e.GetDebug(); debug != nil {
+		for k, v := range debug {
 			values[k] = v
 		}
 	}
@@ -295,18 +288,22 @@ func handleMissingKeys(s string) string {
 
 func (e *Error) Error() string {
 	var b strings.Builder
+	class := e.GetClass()
+	code := e.GetCode()
+	message := e.GetMessage()
+
 	b.WriteString("[")
-	b.WriteString(string(e.class))
+	b.WriteString(string(class))
 	b.WriteString("]")
-	if e.code != "" {
+	if code != "" {
 		b.WriteString(" ")
-		b.WriteString(e.code)
+		b.WriteString(code)
 	}
 	b.WriteString(": ")
-	b.WriteString(e.message)
-	if e.cause != nil {
+	b.WriteString(message)
+	if cause := e.GetCause(); cause != nil {
 		b.WriteString(": ")
-		b.WriteString(e.cause.Error())
+		b.WriteString(cause.Error())
 	}
 	return b.String()
 }
@@ -318,52 +315,322 @@ func (e *Error) Unwrap() error { return e.cause }
 // This enables errors.Is(err, bang.NotFound()) style checks.
 func (e *Error) Is(target error) bool {
 	if matcher, ok := target.(classMatcher); ok {
-		return e.class == matcher.bangClass()
+		return e.GetClass() == matcher.bangClass()
 	}
 
 	var t *Error
 	if !errors.As(target, &t) {
 		return false
 	}
-	if t.code != "" && e.code != "" && e.code == t.code {
+	if targetCode, currentCode := t.GetCode(), e.GetCode(); targetCode != "" && currentCode != "" && currentCode == targetCode {
 		return true
 	}
-	return e.class == t.class
+	return e.GetClass() == t.GetClass()
 }
 
 // ─── Accessors ──────────────────────────────────────────────────────────────
 
-func (e *Error) GetClass() Class  { return e.class }
-func (e *Error) GetCode() string  { return e.code }
-func (e *Error) GetTitle() string { return e.title }
-func (e *Error) GetMessage() string {
-	if e.message == "" {
-		return getClassMeta(e.class).Message
+func (e *Error) walkBangCauses(maxDepth int, fn func(*Error) bool) {
+	if e == nil || maxDepth <= 0 || fn == nil {
+		return
 	}
-	return e.message
+	cur := e.cause
+	for depth := 0; cur != nil && depth < maxDepth; depth++ {
+		ce, ok := cur.(*Error)
+		if ok && ce != nil && fn(ce) {
+			return
+		}
+		cur = errors.Unwrap(cur)
+	}
 }
-func (e *Error) GetData() any             { return e.data }
-func (e *Error) GetSafe() map[string]any  { return e.safe }
-func (e *Error) GetDebug() map[string]any { return e.debug }
-func (e *Error) GetCause() error          { return e.cause }
-func (e *Error) GetStack() []uintptr      { return e.stack }
-func (e *Error) GetFile() string          { return e.file }
-func (e *Error) GetLine() int             { return e.line }
-func (e *Error) GetHTTPStatus() int       { return e.httpStatus }
+
+func (e *Error) GetClass() Class {
+	if e == nil {
+		return ClassUnexpected
+	}
+	if e.class != "" {
+		return e.class
+	}
+	var class Class
+	e.walkBangCauses(causeFallbackMaxDepth, func(ce *Error) bool {
+		if ce.class == "" {
+			return false
+		}
+		class = ce.class
+		return true
+	})
+	if class != "" {
+		return class
+	}
+	return ClassUnexpected
+}
+
+func (e *Error) GetCodePrefix() string {
+	if e == nil {
+		return ""
+	}
+	if e.codePrefix != "" {
+		return e.codePrefix
+	}
+	var codePrefix string
+	e.walkBangCauses(causeFallbackMaxDepth, func(ce *Error) bool {
+		if ce.codePrefix == "" {
+			return false
+		}
+		codePrefix = ce.codePrefix
+		return true
+	})
+	return codePrefix
+}
+
+func (e *Error) GetCode() string {
+	if e == nil {
+		return ""
+	}
+	if e.code != "" {
+		return e.code
+	}
+	var code string
+	e.walkBangCauses(causeFallbackMaxDepth, func(ce *Error) bool {
+		if ce.code == "" {
+			return false
+		}
+		code = ce.code
+		return true
+	})
+	return code
+}
+
+func (e *Error) GetTitle() string {
+	if e == nil {
+		return ""
+	}
+	if e.title != "" {
+		return e.title
+	}
+	var title string
+	e.walkBangCauses(causeFallbackMaxDepth, func(ce *Error) bool {
+		if ce.title == "" {
+			return false
+		}
+		title = ce.title
+		return true
+	})
+	if title != "" {
+		return title
+	}
+	if class := e.GetClass(); class != "" {
+		return getClassMeta(class).Title
+	}
+	return ""
+}
+
+func (e *Error) GetMsgTpl() string {
+	if e == nil {
+		return ""
+	}
+	if e.msgTpl != "" {
+		return e.msgTpl
+	}
+	var msgTpl string
+	e.walkBangCauses(causeFallbackMaxDepth, func(ce *Error) bool {
+		if ce.msgTpl == "" {
+			return false
+		}
+		msgTpl = ce.msgTpl
+		return true
+	})
+	return msgTpl
+}
+
+func (e *Error) GetMessage() string {
+	if e == nil {
+		return ""
+	}
+	if e.message != "" {
+		return e.message
+	}
+	var message string
+	e.walkBangCauses(causeFallbackMaxDepth, func(ce *Error) bool {
+		if ce.message == "" {
+			return false
+		}
+		message = ce.message
+		return true
+	})
+	if message != "" {
+		return message
+	}
+	if class := e.GetClass(); class != "" {
+		return getClassMeta(class).Message
+	}
+	return ""
+}
+
+func (e *Error) GetData() any {
+	if e == nil {
+		return nil
+	}
+	if e.data != nil {
+		return e.data
+	}
+	var data any
+	e.walkBangCauses(causeFallbackMaxDepth, func(ce *Error) bool {
+		if ce.data == nil {
+			return false
+		}
+		data = ce.data
+		return true
+	})
+	return data
+}
+
+func (e *Error) GetSafe() map[string]any {
+	if e == nil {
+		return nil
+	}
+	if len(e.safe) > 0 {
+		return e.safe
+	}
+	var safe map[string]any
+	e.walkBangCauses(causeFallbackMaxDepth, func(ce *Error) bool {
+		if len(ce.safe) == 0 {
+			return false
+		}
+		safe = ce.safe
+		return true
+	})
+	return safe
+}
+
+func (e *Error) GetDebug() map[string]any {
+	if e == nil {
+		return nil
+	}
+	if len(e.debug) > 0 {
+		return e.debug
+	}
+	var debug map[string]any
+	e.walkBangCauses(causeFallbackMaxDepth, func(ce *Error) bool {
+		if len(ce.debug) == 0 {
+			return false
+		}
+		debug = ce.debug
+		return true
+	})
+	return debug
+}
+
+func (e *Error) GetCause() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
 func (e *Error) GetValidationFields() []ValidationField {
-	return e.validationFields
+	if e == nil {
+		return nil
+	}
+	if len(e.validationFields) > 0 {
+		return e.validationFields
+	}
+	var fields []ValidationField
+	e.walkBangCauses(causeFallbackMaxDepth, func(ce *Error) bool {
+		if len(ce.validationFields) == 0 {
+			return false
+		}
+		fields = ce.validationFields
+		return true
+	})
+	return fields
+}
+
+func (e *Error) GetStack() []uintptr {
+	if e == nil {
+		return nil
+	}
+	if len(e.stack) > 0 {
+		return e.stack
+	}
+	var stack []uintptr
+	e.walkBangCauses(causeFallbackMaxDepth, func(ce *Error) bool {
+		if len(ce.stack) == 0 {
+			return false
+		}
+		stack = ce.stack
+		return true
+	})
+	return stack
+}
+
+func (e *Error) GetFile() string {
+	if e == nil {
+		return ""
+	}
+	if e.file != "" {
+		return e.file
+	}
+	var file string
+	e.walkBangCauses(causeFallbackMaxDepth, func(ce *Error) bool {
+		if ce.file == "" {
+			return false
+		}
+		file = ce.file
+		return true
+	})
+	return file
+}
+
+func (e *Error) GetLine() int {
+	if e == nil {
+		return 0
+	}
+	if e.line > 0 {
+		return e.line
+	}
+	var line int
+	e.walkBangCauses(causeFallbackMaxDepth, func(ce *Error) bool {
+		if ce.line <= 0 {
+			return false
+		}
+		line = ce.line
+		return true
+	})
+	return line
+}
+
+func (e *Error) GetHTTPStatus() int {
+	if e == nil {
+		return http.StatusInternalServerError
+	}
+	if e.httpStatus > 0 {
+		return e.httpStatus
+	}
+	var status int
+	e.walkBangCauses(causeFallbackMaxDepth, func(ce *Error) bool {
+		if ce.httpStatus <= 0 {
+			return false
+		}
+		status = ce.httpStatus
+		return true
+	})
+	if status > 0 {
+		return status
+	}
+	return http.StatusInternalServerError
 }
 
 // SafeData returns all user-visible data: expose:"true" fields from typed Data
 // merged with Safe map.
 func (e *Error) SafeData() map[string]any {
 	result := make(map[string]any)
-	if e.data != nil {
-		for k, v := range FilterSafe(e.data) {
+	if data := e.GetData(); data != nil {
+		for k, v := range FilterSafe(data) {
 			result[k] = v
 		}
 	}
-	for k, v := range e.safe {
+	for k, v := range e.GetSafe() {
 		result[k] = v
 	}
 	if len(result) == 0 {
@@ -375,17 +642,43 @@ func (e *Error) SafeData() map[string]any {
 // AllData returns all data merged: typed Data (all fields) + Safe + Debug.
 func (e *Error) AllData() map[string]any {
 	result := make(map[string]any)
-	if e.data != nil {
-		for k, v := range ToMap(e.data) {
+	if data := e.GetData(); data != nil {
+		for k, v := range ToMap(data) {
 			result[k] = v
 		}
 	}
-	for k, v := range e.safe {
+	for k, v := range e.GetSafe() {
 		result[k] = v
 	}
-	for k, v := range e.debug {
+	for k, v := range e.GetDebug() {
 		result[k] = v
 	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// UnsafeData returns only unsafe data: non-exposed typed Data fields + Debug.
+// Safe map and expose:"true" typed fields are excluded.
+func (e *Error) UnsafeData() map[string]any {
+	result := make(map[string]any)
+
+	if data := e.GetData(); data != nil {
+		all := ToMap(data)
+		safe := FilterSafe(data)
+		for k, v := range all {
+			if _, ok := safe[k]; ok {
+				continue
+			}
+			result[k] = v
+		}
+	}
+
+	for k, v := range e.GetDebug() {
+		result[k] = v
+	}
+
 	if len(result) == 0 {
 		return nil
 	}
@@ -398,7 +691,7 @@ func (e *Error) AllData() map[string]any {
 func HasClass(err error, class Class) bool {
 	var e *Error
 	if errors.As(err, &e) {
-		return e.class == class
+		return e.GetClass() == class
 	}
 	return false
 }
@@ -407,7 +700,7 @@ func HasClass(err error, class Class) bool {
 func HasCode(err error, code string) bool {
 	var e *Error
 	if errors.As(err, &e) {
-		return e.code == code
+		return e.GetCode() == code
 	}
 	return false
 }
@@ -419,7 +712,7 @@ func GetData[T any](err error) (T, bool) {
 	if !errors.As(err, &e) {
 		return zero, false
 	}
-	if d, ok := e.data.(T); ok {
+	if d, ok := e.GetData().(T); ok {
 		return d, true
 	}
 	return zero, false
@@ -443,10 +736,11 @@ type Frame struct {
 
 // StackFrames returns human-readable stack frames.
 func (e *Error) StackFrames() []Frame {
-	if len(e.stack) == 0 {
+	stack := e.GetStack()
+	if len(stack) == 0 {
 		return nil
 	}
-	frames := runtime.CallersFrames(e.stack)
+	frames := runtime.CallersFrames(stack)
 	var result []Frame
 	for {
 		frame, more := frames.Next()

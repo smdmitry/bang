@@ -71,6 +71,128 @@ func TestAllConstructors(t *testing.T) {
 	}
 }
 
+func TestFromInheritsUnsetFieldsFromCause(t *testing.T) {
+	cause := bang.Prefix("orders.repo").NotFound().
+		Code("get_by_id").
+		Title("Order Not Found").
+		Msg("Order {{.id}} not found").
+		Data(TestData{UserID: "u-1", Query: "SELECT 1"}).
+		Safe("id", "u-1").
+		Debug("trace_id", "abc-123").
+		Field("id", "required", "missing")
+	cause = cause.HTTPStatus(499).WithStack()
+
+	e := bang.From(cause)
+
+	if e.GetCause() != cause {
+		t.Fatal("cause should be set")
+	}
+	if e.GetClass() != cause.GetClass() {
+		t.Errorf("class = %v, want %v", e.GetClass(), cause.GetClass())
+	}
+	if e.GetCodePrefix() != cause.GetCodePrefix() {
+		t.Errorf("codePrefix = %q, want %q", e.GetCodePrefix(), cause.GetCodePrefix())
+	}
+	if e.GetCode() != cause.GetCode() {
+		t.Errorf("code = %q, want %q", e.GetCode(), cause.GetCode())
+	}
+	if e.GetTitle() != cause.GetTitle() {
+		t.Errorf("title = %q, want %q", e.GetTitle(), cause.GetTitle())
+	}
+	if e.GetMessage() != cause.GetMessage() {
+		t.Errorf("message = %q, want %q", e.GetMessage(), cause.GetMessage())
+	}
+	if e.GetMsgTpl() != cause.GetMsgTpl() {
+		t.Errorf("msgTpl = %q, want %q", e.GetMsgTpl(), cause.GetMsgTpl())
+	}
+	if e.GetHTTPStatus() != cause.GetHTTPStatus() {
+		t.Errorf("httpStatus = %d, want %d", e.GetHTTPStatus(), cause.GetHTTPStatus())
+	}
+	if e.GetData() == nil {
+		t.Error("data should be inherited from cause")
+	}
+	if e.GetSafe()["id"] != "u-1" {
+		t.Errorf("safe[id] = %v", e.GetSafe()["id"])
+	}
+	if e.GetDebug()["trace_id"] != "abc-123" {
+		t.Errorf("debug[trace_id] = %v", e.GetDebug()["trace_id"])
+	}
+	if len(e.GetValidationFields()) != 1 {
+		t.Errorf("validationFields len = %d", len(e.GetValidationFields()))
+	}
+	if len(e.GetStack()) == 0 {
+		t.Error("stack should be inherited from cause")
+	}
+	if e.GetFile() != cause.GetFile() || e.GetLine() != cause.GetLine() {
+		t.Errorf("file:line = %s:%d, want %s:%d", e.GetFile(), e.GetLine(), cause.GetFile(), cause.GetLine())
+	}
+}
+
+func TestPrefixFactoryFromStoresOnlyCause(t *testing.T) {
+	cause := bang.Prefix("source.repo").NotFound().
+		Code("item.get").
+		Title("Item Not Found").
+		Msg("Item {{.id}} not found").
+		Safe("id", "42")
+
+	factory := bang.Prefix("factory.repo").
+		Class(bang.ClassConflict).
+		Title("Factory Title").
+		Msg("Factory message").
+		HTTPStatus(511)
+
+	e := factory.From(cause)
+
+	if e.GetCause() != cause {
+		t.Fatal("cause should be set")
+	}
+	if e.GetCodePrefix() != cause.GetCodePrefix() {
+		t.Errorf("codePrefix = %q, want %q", e.GetCodePrefix(), cause.GetCodePrefix())
+	}
+	if e.GetClass() != cause.GetClass() {
+		t.Errorf("class = %v, want %v", e.GetClass(), cause.GetClass())
+	}
+	if e.GetCode() != cause.GetCode() {
+		t.Errorf("code = %q, want %q", e.GetCode(), cause.GetCode())
+	}
+	if e.GetTitle() != cause.GetTitle() {
+		t.Errorf("title = %q, want %q", e.GetTitle(), cause.GetTitle())
+	}
+	if e.GetMessage() != cause.GetMessage() {
+		t.Errorf("message = %q, want %q", e.GetMessage(), cause.GetMessage())
+	}
+	if e.GetHTTPStatus() != cause.GetHTTPStatus() {
+		t.Errorf("httpStatus = %d, want %d", e.GetHTTPStatus(), cause.GetHTTPStatus())
+	}
+}
+
+func TestFromFallbackMaxDepth(t *testing.T) {
+	base := bang.NotFound().Code("deep.code").Msg("deep message")
+
+	var withinDepth error = base
+	for i := 0; i < 5; i++ {
+		withinDepth = bang.From(withinDepth)
+	}
+	if got := withinDepth.(*bang.Error).GetCode(); got != "deep.code" {
+		t.Errorf("code within depth = %q, want deep.code", got)
+	}
+
+	var overDepth error = base
+	for i := 0; i < 6; i++ {
+		overDepth = bang.From(overDepth)
+	}
+	e := overDepth.(*bang.Error)
+	if e.GetCode() != "" {
+		t.Errorf("code over depth = %q, want empty", e.GetCode())
+	}
+	if e.GetClass() != bang.ClassUnexpected {
+		t.Errorf("class over depth = %q, want %q", e.GetClass(), bang.ClassUnexpected)
+	}
+	if e.GetMessage() != "An unexpected error occurred." {
+		t.Errorf("message over depth = %q, want unexpected default", e.GetMessage())
+	}
+}
+
 // ─── Builder methods ────────────────────────────────────────────────────────
 
 func TestBuilderChaining(t *testing.T) {
@@ -102,7 +224,7 @@ func TestBuilderChaining(t *testing.T) {
 	}
 }
 
-func TestWrapInheritBangErrorFields(t *testing.T) {
+func TestWrapDoesNotInheritBangErrorFields(t *testing.T) {
 	parent := bang.NotFound().
 		Code("users.get_by_id").
 		Title("User Not Found").
@@ -111,17 +233,23 @@ func TestWrapInheritBangErrorFields(t *testing.T) {
 
 	e := bang.InternalServer().Wrap(parent)
 
-	if e.GetClass() != bang.ClassNotFound {
+	if e.GetClass() != bang.ClassInternalServer {
 		t.Errorf("class = %v", e.GetClass())
 	}
-	if e.GetCode() != "users.get_by_id" {
+	if e.GetCode() != "internal_server" {
 		t.Errorf("code = %q", e.GetCode())
 	}
-	if e.GetTitle() != "User Not Found" {
+	if e.GetTitle() != "Internal Server Error" {
 		t.Errorf("title = %q", e.GetTitle())
 	}
-	if e.GetMessage() != "User u-1 not found" {
+	if e.GetMessage() != "An internal error occurred. Please try again later." {
 		t.Errorf("message = %q", e.GetMessage())
+	}
+	if e.GetCause() != parent {
+		t.Fatal("cause should be parent")
+	}
+	if !errors.Is(e, parent) {
+		t.Fatal("errors.Is should match parent")
 	}
 }
 
@@ -626,7 +754,7 @@ func TestToMap(t *testing.T) {
 func TestToHTTP(t *testing.T) {
 	e := bang.NotFound().Code("users.get").Msg("not found")
 	pd := bang.ToHTTP(e, bang.HTTPResponseOptions{Instance: "/api/users/1"})
-	if pd.Status != http.StatusNotFound {
+	if pd.Status != http.StatusInternalServerError {
 		t.Errorf("status = %d", pd.Status)
 	}
 	if pd.ErrorType != "business" {
@@ -652,6 +780,7 @@ func TestToHTTPValidation(t *testing.T) {
 func TestToHTTPDebug(t *testing.T) {
 	e := bang.InternalServer().
 		Data(TestData{UserID: "u1", Query: "q"}).
+		Safe("public", "visible").
 		Debug("extra", "info").
 		WithStack()
 	pd := bang.ToHTTP(e, bang.HTTPResponseOptions{ShowDebug: true})
@@ -660,6 +789,18 @@ func TestToHTTPDebug(t *testing.T) {
 	}
 	if pd.DebugInfo.AllData == nil || len(pd.DebugInfo.Stack) == 0 {
 		t.Error("debug data/stack missing")
+	}
+	if pd.DebugInfo.AllData["query"] != "q" {
+		t.Errorf("query = %v", pd.DebugInfo.AllData["query"])
+	}
+	if pd.DebugInfo.AllData["extra"] != "info" {
+		t.Errorf("extra = %v", pd.DebugInfo.AllData["extra"])
+	}
+	if _, has := pd.DebugInfo.AllData["userId"]; has {
+		t.Error("safe typed field userId should not be in debug data")
+	}
+	if _, has := pd.DebugInfo.AllData["public"]; has {
+		t.Error("safe map field public should not be in debug data")
 	}
 }
 
@@ -676,11 +817,37 @@ func TestToHTTPCauseChain(t *testing.T) {
 	if len(pd.Cause) != 5 {
 		t.Fatalf("cause len = %d, want 5", len(pd.Cause))
 	}
-	if pd.Cause[0].Code != "c1" || pd.Cause[4].Code != "c5" {
-		t.Errorf("unexpected cause codes: first=%q last=%q", pd.Cause[0].Code, pd.Cause[4].Code)
+	if pd.Cause[0].Type != "urn:error:internal_server:c1" || pd.Cause[4].Type != "urn:error:internal_server:c5" {
+		t.Errorf("unexpected cause types: first=%q last=%q", pd.Cause[0].Type, pd.Cause[4].Type)
 	}
 	if pd.Cause[0].Detail != "cause 1" {
 		t.Errorf("detail = %q", pd.Cause[0].Detail)
+	}
+	if pd.Cause[0].ErrorType != "business" {
+		t.Errorf("errorType = %q", pd.Cause[0].ErrorType)
+	}
+
+	raw, err := json.Marshal(pd.Cause[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m["status"]; ok {
+		t.Error("cause should not contain status")
+	}
+	if _, ok := m["instance"]; ok {
+		t.Error("cause should not contain instance")
+	}
+
+	pdDebug := bang.ToHTTP(top, bang.HTTPResponseOptions{ShowDebug: true})
+	if pdDebug.DebugInfo == nil {
+		t.Fatal("debug should be present")
+	}
+	if pdDebug.DebugInfo.Cause != "" {
+		t.Errorf("debug cause should be empty for bang-only chain, got %q", pdDebug.DebugInfo.Cause)
 	}
 }
 
@@ -690,6 +857,36 @@ func TestToHTTPCauseChainSkipsNonBang(t *testing.T) {
 	pd := bang.ToHTTP(e, bang.HTTPResponseOptions{})
 	if len(pd.Cause) != 0 {
 		t.Fatalf("cause len = %d, want 0", len(pd.Cause))
+	}
+
+	pdDebug := bang.ToHTTP(e, bang.HTTPResponseOptions{ShowDebug: true})
+	if pdDebug.DebugInfo == nil {
+		t.Fatal("debug should be present")
+	}
+	if pdDebug.DebugInfo.Cause != "io fail" {
+		t.Errorf("debug cause = %q, want %q", pdDebug.DebugInfo.Cause, "io fail")
+	}
+}
+
+func TestToHTTPCauseChainMixedBangAndNonBang(t *testing.T) {
+	root := fmt.Errorf("io fail")
+	c1 := bang.InternalServer().Wrap(root).Code("c1").Msg("cause 1")
+	top := bang.InternalServer().Wrap(c1).Code("top").Msg("top")
+
+	pd := bang.ToHTTP(top, bang.HTTPResponseOptions{})
+	if len(pd.Cause) != 1 {
+		t.Fatalf("cause len = %d, want 1", len(pd.Cause))
+	}
+	if pd.Cause[0].Type != "urn:error:internal_server:c1" {
+		t.Errorf("cause type = %q", pd.Cause[0].Type)
+	}
+
+	pdDebug := bang.ToHTTP(top, bang.HTTPResponseOptions{ShowDebug: true})
+	if pdDebug.DebugInfo == nil {
+		t.Fatal("debug should be present")
+	}
+	if pdDebug.DebugInfo.Cause != "io fail" {
+		t.Errorf("debug cause = %q, want %q", pdDebug.DebugInfo.Cause, "io fail")
 	}
 }
 
@@ -704,7 +901,7 @@ func TestToHTTPSafeOnly(t *testing.T) {
 func TestWriteHTTP(t *testing.T) {
 	rec := httptest.NewRecorder()
 	bang.WriteHTTP(rec, bang.NotFound().Code("test"), bang.HTTPResponseOptions{Instance: "/test"})
-	if rec.Code != http.StatusNotFound {
+	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d", rec.Code)
 	}
 	if ct := rec.Header().Get("Content-Type"); ct != "application/problem+json" {
@@ -820,7 +1017,7 @@ func TestRegisterClass(t *testing.T) {
 		t.Errorf("title = %q", e.GetTitle())
 	}
 	pd := bang.ToHTTP(e, bang.HTTPResponseOptions{})
-	if pd.Status != 418 {
+	if pd.Status != http.StatusInternalServerError {
 		t.Errorf("status = %d", pd.Status)
 	}
 }

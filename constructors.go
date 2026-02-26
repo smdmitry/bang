@@ -70,15 +70,8 @@ func New(code string) *Error {
 	return e
 }
 
-func From(err error) *Error {
-	e := Unexpected()
-	if err != nil {
-		if parent, ok := AsBang(err); ok && parent != nil && parent != e {
-			e.inheritParent(parent)
-		}
-		e.cause = err
-	}
-	return e
+func Wrap(err error) *Error {
+	return &Error{cause: err}
 }
 
 // FromClass creates an error with an arbitrary class.

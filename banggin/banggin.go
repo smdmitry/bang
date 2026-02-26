@@ -6,13 +6,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/smdmitry/bang"
+	"github.com/smdmitry/bang/bangval"
 )
 
 // ShouldBindJSON binds JSON request body into T. On error, aborts with a bang validation error.
 func ShouldBindJSON[T any](c *gin.Context) *T {
 	var req T
 	if err := c.ShouldBindJSON(&req); err != nil {
-		_ = c.Error(bang.WrapValidationError(err))
+		_ = c.Error(bangval.WrapValidationErr(err))
 		c.Abort()
 		return nil
 	}
@@ -57,7 +58,7 @@ func AbortBind(c *gin.Context, err error) {
 	if err == nil {
 		return
 	}
-	wrappedErr := bang.WrapValidationError(err)
+	wrappedErr := bangval.WrapValidationErr(err)
 	if wrappedErr == nil {
 		return
 	}
