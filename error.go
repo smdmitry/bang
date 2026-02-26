@@ -364,6 +364,9 @@ func (e *Error) GetClass() Class {
 	}
 	return ClassUnexpected
 }
+func (e *Error) SelfClass() Class {
+	return e.class
+}
 
 func (e *Error) GetCodePrefix() string {
 	if e == nil {
@@ -382,6 +385,9 @@ func (e *Error) GetCodePrefix() string {
 	})
 	return codePrefix
 }
+func (e *Error) SelfCodePrefix() string {
+	return e.codePrefix
+}
 
 func (e *Error) GetCode() string {
 	if e == nil {
@@ -399,6 +405,10 @@ func (e *Error) GetCode() string {
 		return true
 	})
 	return code
+}
+
+func (e *Error) SelfCode() string {
+	return e.code
 }
 
 func (e *Error) GetTitle() string {
@@ -425,6 +435,10 @@ func (e *Error) GetTitle() string {
 	return ""
 }
 
+func (e *Error) SelfTitle() string {
+	return e.title
+}
+
 func (e *Error) GetMsgTpl() string {
 	if e == nil {
 		return ""
@@ -441,6 +455,10 @@ func (e *Error) GetMsgTpl() string {
 		return true
 	})
 	return msgTpl
+}
+
+func (e *Error) SelfMsgTpl() string {
+	return e.msgTpl
 }
 
 func (e *Error) GetMessage() string {
@@ -467,6 +485,10 @@ func (e *Error) GetMessage() string {
 	return ""
 }
 
+func (e *Error) SelfMessage() string {
+	return e.message
+}
+
 func (e *Error) GetData() any {
 	if e == nil {
 		return nil
@@ -483,6 +505,10 @@ func (e *Error) GetData() any {
 		return true
 	})
 	return data
+}
+
+func (e *Error) SelfData() any {
+	return e.data
 }
 
 func (e *Error) GetSafe() map[string]any {
@@ -503,6 +529,10 @@ func (e *Error) GetSafe() map[string]any {
 	return safe
 }
 
+func (e *Error) SelfSafe() map[string]any {
+	return e.safe
+}
+
 func (e *Error) GetDebug() map[string]any {
 	if e == nil {
 		return nil
@@ -519,6 +549,10 @@ func (e *Error) GetDebug() map[string]any {
 		return true
 	})
 	return debug
+}
+
+func (e *Error) SelfDebug() map[string]any {
+	return e.debug
 }
 
 func (e *Error) GetCause() error {
@@ -546,6 +580,10 @@ func (e *Error) GetValidationFields() []ValidationField {
 	return fields
 }
 
+func (e *Error) SelfValidationFields() []ValidationField {
+	return e.validationFields
+}
+
 func (e *Error) GetStack() []uintptr {
 	if e == nil {
 		return nil
@@ -562,6 +600,10 @@ func (e *Error) GetStack() []uintptr {
 		return true
 	})
 	return stack
+}
+
+func (e *Error) SelfStack() []uintptr {
+	return e.stack
 }
 
 func (e *Error) GetFile() string {
@@ -582,6 +624,10 @@ func (e *Error) GetFile() string {
 	return file
 }
 
+func (e *Error) SelfFile() string {
+	return e.file
+}
+
 func (e *Error) GetLine() int {
 	if e == nil {
 		return 0
@@ -598,6 +644,10 @@ func (e *Error) GetLine() int {
 		return true
 	})
 	return line
+}
+
+func (e *Error) SelfLine() int {
+	return e.line
 }
 
 func (e *Error) GetHTTPStatus() int {
@@ -618,21 +668,51 @@ func (e *Error) GetHTTPStatus() int {
 	if status > 0 {
 		return status
 	}
+	class := e.GetClass()
+	if class != "" {
+		return class.HTTPStatus()
+	}
 	return http.StatusInternalServerError
+}
+
+func (e *Error) SelfHTTPStatus() int {
+	return e.httpStatus
+}
+
+// SelfSafeData returns user-visible data from the current error only:
+// expose:"true" fields from local typed Data merged with local Safe map.
+func (e *Error) SelfSafeData() map[string]any {
+	result := make(map[string]any)
+	for k, v := range e.SelfSafe() {
+		result[k] = v
+	}
+
+	if data := e.SelfData(); data != nil {
+		for k, v := range FilterSafe(data) {
+			result[k] = v
+		}
+	}
+
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 // SafeData returns all user-visible data: expose:"true" fields from typed Data
 // merged with Safe map.
 func (e *Error) SafeData() map[string]any {
 	result := make(map[string]any)
+	for k, v := range e.GetSafe() {
+		result[k] = v
+	}
+
 	if data := e.GetData(); data != nil {
 		for k, v := range FilterSafe(data) {
 			result[k] = v
 		}
 	}
-	for k, v := range e.GetSafe() {
-		result[k] = v
-	}
+
 	if len(result) == 0 {
 		return nil
 	}
@@ -642,17 +722,19 @@ func (e *Error) SafeData() map[string]any {
 // AllData returns all data merged: typed Data (all fields) + Safe + Debug.
 func (e *Error) AllData() map[string]any {
 	result := make(map[string]any)
+	for k, v := range e.GetDebug() {
+		result[k] = v
+	}
+	for k, v := range e.GetSafe() {
+		result[k] = v
+	}
+
 	if data := e.GetData(); data != nil {
 		for k, v := range ToMap(data) {
 			result[k] = v
 		}
 	}
-	for k, v := range e.GetSafe() {
-		result[k] = v
-	}
-	for k, v := range e.GetDebug() {
-		result[k] = v
-	}
+
 	if len(result) == 0 {
 		return nil
 	}
@@ -664,6 +746,10 @@ func (e *Error) AllData() map[string]any {
 func (e *Error) UnsafeData() map[string]any {
 	result := make(map[string]any)
 
+	for k, v := range e.GetDebug() {
+		result[k] = v
+	}
+
 	if data := e.GetData(); data != nil {
 		all := ToMap(data)
 		safe := FilterSafe(data)
@@ -673,10 +759,6 @@ func (e *Error) UnsafeData() map[string]any {
 			}
 			result[k] = v
 		}
-	}
-
-	for k, v := range e.GetDebug() {
-		result[k] = v
 	}
 
 	if len(result) == 0 {

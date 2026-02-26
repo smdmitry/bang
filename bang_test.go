@@ -193,6 +193,63 @@ func TestFromFallbackMaxDepth(t *testing.T) {
 	}
 }
 
+func TestSelfAccessorsDoNotFallbackToCause(t *testing.T) {
+	cause := bang.Prefix("orders.repo").NotFound().
+		Code("get_by_id").
+		Title("Order Not Found").
+		Msg("Order {{.id}} not found").
+		Data(TestData{UserID: "u-1", Query: "SELECT 1"}).
+		Safe("id", "u-1").
+		Debug("trace_id", "abc-123").
+		Field("id", "required", "missing")
+	cause = cause.HTTPStatus(499).WithStack()
+
+	e := bang.From(cause)
+
+	if e.SelfClass() != cause.GetClass() {
+		t.Errorf("SelfClass = %q, want %q", e.SelfClass(), cause.GetClass())
+	}
+	if e.SelfCodePrefix() != "" {
+		t.Errorf("SelfCodePrefix = %q, want empty", e.SelfCodePrefix())
+	}
+	if e.SelfCode() == cause.GetCode() {
+		t.Errorf("SelfCode should be local, got inherited %q", e.SelfCode())
+	}
+	if e.SelfTitle() == cause.GetTitle() {
+		t.Errorf("SelfTitle should be local, got inherited %q", e.SelfTitle())
+	}
+	if e.SelfMsgTpl() != "" {
+		t.Errorf("SelfMsgTpl = %q, want empty", e.SelfMsgTpl())
+	}
+	if e.SelfMessage() == cause.GetMessage() {
+		t.Errorf("SelfMessage should be local, got inherited %q", e.SelfMessage())
+	}
+	if e.SelfData() != nil {
+		t.Errorf("SelfData = %v, want nil", e.SelfData())
+	}
+	if e.SelfSafe() != nil {
+		t.Errorf("SelfSafe = %v, want nil", e.SelfSafe())
+	}
+	if e.SelfDebug() != nil {
+		t.Errorf("SelfDebug = %v, want nil", e.SelfDebug())
+	}
+	if len(e.SelfValidationFields()) != 0 {
+		t.Errorf("SelfValidationFields len = %d, want 0", len(e.SelfValidationFields()))
+	}
+	if len(e.SelfStack()) != 0 {
+		t.Errorf("SelfStack len = %d, want 0", len(e.SelfStack()))
+	}
+	if e.SelfFile() != "" {
+		t.Errorf("SelfFile = %q, want caller file", e.SelfFile())
+	}
+	if e.SelfLine() != 0 {
+		t.Errorf("SelfLine = %d, want caller line", e.SelfLine())
+	}
+	if e.SelfHTTPStatus() != 0 {
+		t.Errorf("SelfHTTPStatus = %d, want 0", e.SelfHTTPStatus())
+	}
+}
+
 // ─── Builder methods ────────────────────────────────────────────────────────
 
 func TestBuilderChaining(t *testing.T) {

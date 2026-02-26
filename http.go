@@ -10,6 +10,8 @@ import (
 	"strings"
 )
 
+const CauseMaxDepth = 5
+
 // ProblemDetail represents an RFC 7807 Problem Details response.
 type ProblemDetail struct {
 	Type     string `json:"type"`
@@ -67,66 +69,16 @@ func ToHTTP(err error, opts HTTPResponseOptions) ProblemDetail {
 		e = WrapUnknown(err)
 	}
 
-	class := e.GetClass()
-	title := e.GetTitle()
-	detail := e.GetMessage()
-
-	status := class.HTTPStatus()
-	if httpStatus := e.GetHTTPStatus(); httpStatus != 0 {
-		status = httpStatus
-	}
-
 	pd := ProblemDetail{
-		Type:   getURN(e),
-		Status: status,
-		Title:  title,
-		Detail: detail,
-	}
-	if opts.Instance != "" {
-		pd.Instance = opts.Instance
-	}
-
-	// Safe data: expose:"true" fields from typed Data + Safe map.
-	safeData := e.SafeData()
-	if len(safeData) > 0 {
-		pd.Details = safeData
-	}
-
-	// Validation errors (without rule — rule is unsafe).
-	if validationFields := e.GetValidationFields(); len(validationFields) > 0 {
-		pd.Errors = make([]ValidationError, len(validationFields))
-		for i, vf := range validationFields {
-			pd.Errors[i] = ValidationError{Key: vf.Key, Reason: vf.Reason}
-		}
-	}
-
-	// Public cause chain (only nested bang errors), max depth 5.
-	pd.Cause = buildBangCauseChain(e, 5, opts)
-
-	// Debug info (only for development builds or admin users).
-	if opts.ShowDebug {
-		file := e.GetFile()
-		line := e.GetLine()
-		debug := &DebugInfo{File: file + ":" + strconv.Itoa(line)}
-
-		allData := e.UnsafeData()
-		if len(allData) > 0 {
-			debug.AllData = allData
-		}
-		if frames := e.StackFrames(); len(frames) > 0 {
-			debug.Stack = frames
-		}
-		if cause := firstNonBangCause(e.GetCause(), 1); cause != nil {
-			debug.Cause = cause.Error()
-		}
-		if opts.ShowSource && file != "" && line > 0 {
-			ctx := opts.SourceContextLines
-			if ctx <= 0 {
-				ctx = 3
-			}
-			debug.Source = readSourceContext(file, line, ctx)
-		}
-		pd.DebugInfo = debug
+		Type:      getURN(e),
+		Status:    e.GetHTTPStatus(),
+		Title:     e.GetTitle(),
+		Detail:    e.GetMessage(),
+		Instance:  opts.Instance,
+		Details:   e.SafeData(),
+		Errors:    getValidationErrors(e),
+		Cause:     buildBangCauseChain(e, CauseMaxDepth, opts),
+		DebugInfo: getDebugInfo(e, opts),
 	}
 
 	return pd
@@ -142,45 +94,13 @@ func buildBangCauseChain(e *Error, maxDepth int, opts HTTPResponseOptions) []Pro
 	for cur != nil && len(chain) < maxDepth {
 		if ce, ok := cur.(*Error); ok {
 			cause := ProblemCause{
-				Type:   getURN(ce),
-				Title:  ce.GetTitle(),
-				Detail: ce.GetMessage(),
+				Type:      getURN(ce),
+				Title:     ce.SelfTitle(),
+				Detail:    ce.SelfMessage(),
+				Details:   ce.SelfSafeData(),
+				Errors:    getValidationErrors(ce),
+				DebugInfo: getDebugInfo(ce, opts),
 			}
-			if details := ce.SafeData(); len(details) > 0 {
-				cause.Details = details
-			}
-			if validationFields := ce.GetValidationFields(); len(validationFields) > 0 {
-				cause.Errors = make([]ValidationError, len(validationFields))
-				for i, vf := range validationFields {
-					cause.Errors[i] = ValidationError{Key: vf.Key, Reason: vf.Reason}
-				}
-			}
-
-			if opts.ShowDebug {
-				file := ce.GetFile()
-				line := ce.GetLine()
-				debug := &DebugInfo{File: file + ":" + strconv.Itoa(line)}
-
-				allData := ce.UnsafeData()
-				if len(allData) > 0 {
-					debug.AllData = allData
-				}
-				if frames := ce.StackFrames(); len(frames) > 0 {
-					debug.Stack = frames
-				}
-				if ceCause := firstNonBangCause(ce.GetCause(), 1); ceCause != nil {
-					debug.Cause = ceCause.Error()
-				}
-				if opts.ShowSource && file != "" && line > 0 {
-					ctx := opts.SourceContextLines
-					if ctx <= 0 {
-						ctx = 3
-					}
-					debug.Source = readSourceContext(file, line, ctx)
-				}
-				cause.DebugInfo = debug
-			}
-
 			chain = append(chain, cause)
 		}
 		cur = errors.Unwrap(cur)
@@ -247,4 +167,43 @@ func getURN(err *Error) string {
 	}
 
 	return "urn:" + urnType
+}
+
+func getDebugInfo(e *Error, opts HTTPResponseOptions) *DebugInfo {
+	if !opts.ShowDebug {
+		return nil
+	}
+
+	file := e.GetFile()
+	line := e.GetLine()
+	debug := &DebugInfo{File: file + ":" + strconv.Itoa(line)}
+
+	allData := e.UnsafeData()
+	if len(allData) > 0 {
+		debug.AllData = allData
+	}
+	if frames := e.StackFrames(); len(frames) > 0 {
+		debug.Stack = frames
+	}
+	if cause := firstNonBangCause(e.GetCause(), 1); cause != nil {
+		debug.Cause = cause.Error()
+	}
+	if opts.ShowSource && file != "" && line > 0 {
+		ctx := opts.SourceContextLines
+		if ctx <= 0 {
+			ctx = 3
+		}
+		debug.Source = readSourceContext(file, line, ctx)
+	}
+	return debug
+}
+
+func getValidationErrors(e *Error) (errors []ValidationError) {
+	if validationFields := e.GetValidationFields(); len(validationFields) > 0 {
+		errors = make([]ValidationError, len(validationFields))
+		for i, vf := range validationFields {
+			errors[i] = ValidationError{Key: vf.Key, Reason: vf.Reason}
+		}
+	}
+	return errors
 }
