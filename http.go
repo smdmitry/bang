@@ -14,25 +14,23 @@ const CauseMaxDepth = 5
 
 // ProblemDetail represents an RFC 7807 Problem Details response.
 type ProblemDetail struct {
-	Type     string `json:"type"`
-	Status   int    `json:"status"`
-	Title    string `json:"title"`
-	Detail   string `json:"detail"`
-	Instance string `json:"instance,omitempty"`
-
-	Details map[string]any    `json:"details,omitempty"`
-	Errors  []ValidationError `json:"errors,omitempty"`
-	Cause   []ProblemCause    `json:"cause,omitempty"`
-
-	DebugInfo *DebugInfo `json:"debug,omitempty"`
+	Type      string            `json:"type"`
+	Status    int               `json:"status"`
+	Title     string            `json:"title"`
+	Detail    string            `json:"detail"`
+	Instance  string            `json:"instance,omitempty"`
+	Details   map[string]any    `json:"details,omitempty"`
+	Errors    []ValidationError `json:"errors,omitempty"`
+	Cause     []ProblemCause    `json:"cause,omitempty"`
+	DebugInfo *DebugInfo        `json:"debug,omitempty"`
 }
 
 // ProblemCause is a public cause-chain element with the same shape as
 // ProblemDetail, except it has no status/instance fields.
 type ProblemCause struct {
 	Type      string            `json:"type"`
-	Title     string            `json:"title"`
-	Detail    string            `json:"detail"`
+	Title     string            `json:"title,omitempty"`
+	Detail    string            `json:"detail,omitempty"`
 	Details   map[string]any    `json:"details,omitempty"`
 	Errors    []ValidationError `json:"errors,omitempty"`
 	Cause     []ProblemCause    `json:"cause,omitempty"`
@@ -47,11 +45,11 @@ type ValidationError struct {
 
 // DebugInfo contains diagnostic information (development/admin only).
 type DebugInfo struct {
+	Cause   string         `json:"cause,omitempty"`
+	File    string         `json:"file,omitempty"`
 	AllData map[string]any `json:"data,omitempty"`
 	Stack   []Frame        `json:"stack,omitempty"`
-	File    string         `json:"file,omitempty"`
 	Source  string         `json:"source,omitempty"`
-	Cause   string         `json:"cause,omitempty"`
 }
 
 // HTTPResponseOptions configures ProblemDetail generation.
