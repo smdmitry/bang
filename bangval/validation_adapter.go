@@ -39,7 +39,7 @@ func WrapValidationErr(err error) *bang.Error {
 			Wrap(err)
 
 		for _, fe := range fields {
-			if Translator != nil {
+			if Translator != nil && fe.Tag() != "msg_in_param" {
 				e.Field(validationFieldKey(fe), fe.Tag(), fe.Translate(Translator))
 			} else {
 				e.Field(validationFieldKey(fe), fe.Tag(), validationReason(fe))
